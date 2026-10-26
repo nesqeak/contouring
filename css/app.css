@@ -184,3 +184,10 @@ ul.list li:not(.here) .nm{color:var(--muted)}
 .fuswin label b{font-family:var(--f-data);font-weight:500;color:var(--fg)}
 .fuswin .ck{justify-content:flex-start;align-items:center;gap:6px}
 .fuswin .btn{justify-self:start;font-size:.74rem;padding:2px 8px}
+.optool{border-top:1px solid var(--line);padding-top:6px;display:grid;gap:5px}
+.optool summary{cursor:pointer;font-size:.84rem;font-weight:500}
+.optool[open]{padding-bottom:4px}
+.optool select{font:inherit;font-size:.84rem;width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:4px}
+.optool .btn{justify-self:start}
+.mgrid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 6px;align-items:center;font-size:.8rem}
+.mgrid input{font:inherit;font-size:.82rem;width:100%;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:3px 5px;font-variant-numeric:tabular-nums}

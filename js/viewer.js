@@ -63,6 +63,30 @@ function open(root,ctx){
       </div>
       <div class="tools"><button class="btn" id="einterp" title="Créer les coupes axiales manquantes entre deux coupes contourées (raccourci I)">Interpoler les coupes</button></div>
       <div class="tools"><button class="btn danger" id="ewipe" title="Effacer la structure sur toutes les coupes (Ctrl+Z pour annuler)">Effacer toute la structure</button><span id="ewipe-confirm" hidden><button class="btn danger" id="ewipe-yes">Effacer</button> <button class="btn" id="ewipe-no">Garder</button></span></div>
+      <details class="optool" id="mtool"><summary>Marge</summary>
+        <label class="hint" for="m-src">Structure source</label><select id="m-src"></select>
+        <div class="hint">Marges en mm (négatives pour rétrécir)</div>
+        <div class="mgrid">
+          <label for="m-all">Toutes</label><input type="number" id="m-all" step="0.5" placeholder="—"><span></span><span></span>
+          <label for="m-D">Droite</label><input type="number" id="m-D" step="0.5" value="0" data-m>
+          <label for="m-G">Gauche</label><input type="number" id="m-G" step="0.5" value="0" data-m>
+          <label for="m-A">Antérieure</label><input type="number" id="m-A" step="0.5" value="0" data-m>
+          <label for="m-P">Postérieure</label><input type="number" id="m-P" step="0.5" value="0" data-m>
+          <label for="m-S">Supérieure</label><input type="number" id="m-S" step="0.5" value="0" data-m>
+          <label for="m-I">Inférieure</label><input type="number" id="m-I" step="0.5" value="0" data-m>
+        </div>
+        <label class="hint" for="m-out">Structure de sortie</label><select id="m-out"></select>
+        <button class="btn" id="m-go">Créer la marge</button>
+      </details>
+      <details class="optool" id="btool"><summary>Opérations booléennes</summary>
+        <label class="hint" for="b-a">Volume A</label><select id="b-a"></select>
+        <label class="hint" for="b-op">Opération</label><select id="b-op">
+          <option value="and">A ET B (AND : intersection)</option><option value="or">A OU B (OR : union)</option>
+          <option value="not">A SAUF B (NOT : A privé de B)</option><option value="xor">A OU exclusif B (XOR)</option></select>
+        <label class="hint" for="b-b">Volume B</label><select id="b-b"></select>
+        <label class="hint" for="b-out">Volume de sortie</label><select id="b-out"></select>
+        <button class="btn" id="b-go">Calculer</button>
+      </details>
       <div class="status" id="estatus">Les contours en cours sont enregistrés dans ce navigateur après chaque tracé.</div>
       <div class="hint">Peindre dans une vue modifie la coupe affichée. Interpoler : contourer une coupe sur deux ou trois, puis remplir les coupes intermédiaires ; une coupe retouchée à la main n'est plus recalculée. Raccourcis : P pinceau, G gomme, I interpoler, [ et ] rayon, Ctrl+Z annuler, flèches haut/bas pour changer de coupe axiale.</div>
     </section>
@@ -320,6 +344,7 @@ function open(root,ctx){
     markDirty(k.st); drawAll(); updEdit();
   }
   function undo(){ if(validated) return; const k=ED.undo.pop(); if(!k) return;
+    if(k.snap){ k.st.sl=k.snap; k.st.b=k.box; }
     for(const [i,old] of k.changes){ setV(k.st,i,old); if(old) growBox(k.st,i%NX,((i/NX)|0)%NY,(i/NXY)|0); }
     if(k.interpPrev) k.st.interp=k.interpPrev;
     markDirty(k.st); drawAll(); updEdit();}
@@ -380,6 +405,67 @@ function open(root,ctx){
     setStatus(`${st.name} : ${made} coupe${made>1?'s':''} interpolée${made>1?'s':''} (Ctrl+Z pour annuler).`,'dirty');
   }
 
+  // ---- outils volumiques : marge et opérations booléennes ----
+  // Les calculs se font dans une boîte englobante (x0..x1, y0..y1, z0..z1) ; le résultat remplace la structure
+  // de sortie (une cible), annulable d'un bloc par Ctrl+Z.
+  const boxOf=st=>{ const b=st.b; return b&&b[1]>=b[0]?b.slice():null; };
+  function readBox(st,[x0,x1,y0,y1,z0,z1]){ const w=x1-x0+1, h=y1-y0+1, out=new Uint8Array(w*h*(z1-z0+1));
+    for(let z=z0;z<=z1;z++){ const s=st.sl[z]; if(!s) continue;
+      for(let y=Math.max(y0,s.y0);y<=Math.min(y1,s.y0+s.h-1);y++){ const o=((z-z0)*h+(y-y0))*w;
+        for(let x=Math.max(x0,s.x0);x<=Math.min(x1,s.x0+s.w-1);x++) out[o+x-x0]=s.m[(y-s.y0)*s.w+x-s.x0]; } }
+    return out; }
+  function writeOut(st,[x0,x1,y0,y1,z0,z1],data,label){
+    const k={vw:VIEWS[0],st,changes:new Map(),snap:st.sl.slice(),box:st.b.slice(),interpPrev:new Set(st.interp)};
+    const w=x1-x0+1, h=y1-y0+1, sl=new Array(NZ).fill(null); let n=0;
+    for(let z=z0;z<=z1;z++) for(let y=y0;y<=y1;y++){ const o=((z-z0)*h+(y-y0))*w;
+      for(let x=x0;x<=x1;x++) if(data[o+x-x0]){ (sl[z]||(sl[z]={x0:0,y0:0,w:NX,h:NY,m:new Uint8Array(NXY)})).m[y*NX+x]=1; n++; } }
+    st.sl=sl; st.b=tightBox(st); st.interp.clear(); st.on=true; if(st.li) st.li.querySelector('input').checked=true;
+    ED.undo.push(k); if(ED.undo.length>50) ED.undo.shift();
+    markDirty(st); drawAll(); updEdit();
+    setStatus(`${st.name} : ${label} (${(n*DX*DY*DZ/1000).toFixed(1).replace('.',',')} cm³). Ctrl+Z pour annuler.`,n?'dirty':'err');
+    if(!n) setStatus(`${st.name} : ${label} — résultat vide. Ctrl+Z pour annuler.`,'err'); }
+  // élément structurant : ellipsoïde par octant, demi-axes en mm selon le signe du décalage (x+ = gauche, y+ = arrière, z+ = haut)
+  function ellipsoid(px,nx,py,ny,pz,nz){ const offs=[], R=[Math.ceil(Math.max(px,nx)/DX),Math.ceil(Math.max(py,ny)/DY),Math.ceil(Math.max(pz,nz)/DZ)];
+    for(let k=-R[2];k<=R[2];k++)for(let j=-R[1];j<=R[1];j++)for(let i=-R[0];i<=R[0];i++){
+      const rx=i>0?px:nx, ry=j>0?py:ny, rz=k>0?pz:nz;
+      if((i&&!rx)||(j&&!ry)||(k&&!rz)) continue;
+      const q=(i?(i*DX/rx)**2:0)+(j?(j*DY/ry)**2:0)+(k?(k*DZ/rz)**2:0); if(q<=1+1e-9) offs.push([i,j,k]); }
+    return offs; }
+  // dilatation (marges positives) puis érosion (marges négatives), dans une boîte élargie de la marge
+  function margin(src,m){ // m : {D,G,A,P,S,I} en mm
+    const b0=boxOf(src); if(!b0) return null;
+    const pos=v=>Math.max(0,v), neg=v=>Math.max(0,-v), g=[Math.ceil(pos(m.D)/DX)+1,Math.ceil(pos(m.G)/DX)+1,Math.ceil(pos(m.A)/DY)+1,Math.ceil(pos(m.P)/DY)+1,Math.ceil(pos(m.I)/DZ)+1,Math.ceil(pos(m.S)/DZ)+1];
+    const B=[Math.max(0,b0[0]-g[0]),Math.min(NX-1,b0[1]+g[1]),Math.max(0,b0[2]-g[2]),Math.min(NY-1,b0[3]+g[3]),Math.max(0,b0[4]-g[4]),Math.min(NZ-1,b0[5]+g[5])];
+    const w=B[1]-B[0]+1, h=B[3]-B[2]+1, d=B[5]-B[4]+1, wh=w*h; let A=readBox(src,B);
+    const inB=(x,y,z)=>x>=0&&y>=0&&z>=0&&x<w&&y<h&&z<d;
+    const stamp=(M,val,offs,seed)=>{ const out=M.slice();
+      for(let z=0;z<d;z++)for(let y=0;y<h;y++)for(let x=0;x<w;x++){ const i=z*wh+y*w+x; if(!seed(i,x,y,z)) continue;
+        for(const [a,b,c] of offs){ const X=x+a,Y=y+b,Z=z+c; if(inB(X,Y,Z)) out[Z*wh+Y*w+X]=val; } }
+      return out; };
+    // germes : voxels du bord (un voisin à 6-connexité de l'autre côté)
+    const edge=(M,v)=>(i,x,y,z)=>M[i]===v&&((x>0&&M[i-1]!==v)||(x<w-1&&M[i+1]!==v)||(y>0&&M[i-w]!==v)||(y<h-1&&M[i+w]!==v)||(z>0&&M[i-wh]!==v)||(z<d-1&&M[i+wh]!==v));
+    if(m.D>0||m.G>0||m.A>0||m.P>0||m.S>0||m.I>0) A=stamp(A,1,ellipsoid(pos(m.G),pos(m.D),pos(m.P),pos(m.A),pos(m.S),pos(m.I)),edge(A,1));
+    if(m.D<0||m.G<0||m.A<0||m.P<0||m.S<0||m.I<0) A=stamp(A,0,ellipsoid(neg(m.D),neg(m.G),neg(m.A),neg(m.P),neg(m.I),neg(m.S)),edge(A,0));
+    return {box:B,data:A}; }
+  function boolean(a,op,b){
+    const ba=boxOf(a), bb=boxOf(b), u=(p,q)=>p&&q?[Math.min(p[0],q[0]),Math.max(p[1],q[1]),Math.min(p[2],q[2]),Math.max(p[3],q[3]),Math.min(p[4],q[4]),Math.max(p[5],q[5])]:(p||q);
+    const B=op==='and'||op==='not'?ba:u(ba,bb); if(!B) return {box:[0,0,0,0,0,0],data:new Uint8Array(1)};
+    const A=readBox(a,B), C=bb?readBox(b,B):new Uint8Array(A.length), out=new Uint8Array(A.length);
+    for(let i=0;i<A.length;i++) out[i]=op==='and'?A[i]&C[i]:op==='or'?A[i]|C[i]:op==='xor'?A[i]^C[i]:A[i]&(1-C[i]);
+    return {box:B,data:out}; }
+  const OPN={and:'A ET B',or:'A OU B',not:'A SAUF B',xor:'A OU exclusif B'};
+  function runMargin(){ if(validated) return;
+    const src=byId[$('m-src').value], out=byId[$('m-out').value], m={};
+    for(const k of 'DGAPSI'){ const v=parseFloat($('m-'+k).value.replace(',','.')); if(!Number.isFinite(v)||Math.abs(v)>50){ setStatus('Marge : valeurs entre −50 et 50 mm attendues.','err'); return; } m[k]=v; }
+    if(!src||!out) return; if(!boxOf(src)){ setStatus(`Marge : ${src.name} est vide.`,'err'); return; }
+    if(Object.values(m).every(v=>!v)&&src===out){ setStatus('Marge : toutes les marges sont nulles.','err'); return; }
+    setStatus('Calcul de la marge…','dirty');
+    setTimeout(()=>{ const r=margin(src,m); writeOut(out,r.box,r.data,`marge de ${src.name} (D ${m.D}, G ${m.G}, A ${m.A}, P ${m.P}, S ${m.S}, I ${m.I} mm)`); },20); }
+  function runBool(){ if(validated) return;
+    const a=byId[$('b-a').value], b=byId[$('b-b').value], op=$('b-op').value, out=byId[$('b-out').value]; if(!a||!b||!out) return;
+    setStatus('Calcul…','dirty');
+    setTimeout(()=>{ const r=boolean(a,op,b); writeOut(out,r.box,r.data,`${OPN[op].replace('A',a.name).replace('B',b.name)}`); },20); }
+
   // ---- enregistrement local des contours en cours ----
   let saveTimer=null, saving=false, pending=false;
   const stat=$('estatus');
@@ -435,6 +521,7 @@ function open(root,ctx){
     $('edit').classList.toggle('on',ED.on);
     const dis=!ED.on||!targets.length;
     ['estruct','erad','esoft','ecopyup','ecopydn','eclear','einterp'].forEach(i=>$(i).disabled=dis);
+    ['m-go','b-go'].forEach(i=>$(i).disabled=!targets.length||validated);
     $('ewipe').disabled=dis||!ED.st||ED.st.b[1]<ED.st.b[0];
     [...$('etool').children].forEach(b=>{b.disabled=dis;b.setAttribute('aria-pressed',b.dataset.t===ED.tool);});
     $('eundo').disabled=dis||!ED.undo.length; $('eradv').textContent=ED.r+' mm';
@@ -449,6 +536,15 @@ function open(root,ctx){
   $('ecopydn').onclick=()=>{ if(pos.z<=0)return; const st=ED.st; sliceOp((x,y,z)=>getV(st,IDX(x,y,z-1))); };
   $('eclear').onclick=()=>sliceOp(()=>0);
   $('einterp').onclick=interpolate;
+  // menus des outils : cibles seules pour la marge et les sorties ; toutes les structures affichées pour A et B
+  const opt=l=>l.map(st=>`<option value="${st.id}">${esc(st.name)}</option>`).join('');
+  for(const id of ['m-src','m-out','b-out']) $(id).innerHTML=opt(targets);
+  for(const id of ['b-a','b-b']) $(id).innerHTML=`<optgroup label="Structures à contourer">${opt(targets)}</optgroup>`+(refs.length?`<optgroup label="Structures de référence">${opt(refs)}</optgroup>`:'');
+  if(targets[1]) $('m-out').value=$('b-out').value=targets[1].id;
+  $('m-all').oninput=e=>{ const v=e.target.value; if(v!=='') root.querySelectorAll('[data-m]').forEach(i=>i.value=v); };
+  root.querySelectorAll('[data-m]').forEach(i=>i.oninput=()=>{ $('m-all').value=''; });
+  $('m-go').onclick=runMargin; $('b-go').onclick=runBool;
+  root.querySelectorAll('.optool input, .optool select').forEach(el=>el.addEventListener('keydown',e=>e.stopPropagation()));
   $('ewipe').onclick=()=>{$('ewipe').hidden=true;$('ewipe-confirm').hidden=false;};
   $('ewipe-no').onclick=()=>{$('ewipe').hidden=false;$('ewipe-confirm').hidden=true;};
   $('ewipe-yes').onclick=()=>{$('ewipe').hidden=false;$('ewipe-confirm').hidden=true; wipeStruct();};
