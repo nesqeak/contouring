@@ -177,3 +177,10 @@ ul.list li:not(.here) .nm{color:var(--muted)}
 .fusmix{display:grid;gap:2px;min-width:180px}
 .fusmix span{font-family:var(--f-data);font-size:.68rem;color:var(--muted)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.fuswin{font-size:.74rem;color:var(--muted)}
+.fuswin summary{cursor:pointer;padding:2px 0}
+.fuswin[open]{display:grid;gap:3px;padding-bottom:2px}
+.fuswin label{display:flex;justify-content:space-between;gap:8px}
+.fuswin label b{font-family:var(--f-data);font-weight:500;color:var(--fg)}
+.fuswin .ck{justify-content:flex-start;align-items:center;gap:6px}
+.fuswin .btn{justify-self:start;font-size:.74rem;padding:2px 8px}

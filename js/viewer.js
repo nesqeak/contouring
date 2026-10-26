@@ -207,20 +207,35 @@ function open(root,ctx){
     const bar=VIEWS[0].el.querySelector('.fusbar'); bar.hidden=false;
     bar.innerHTML=`<label class="sr" for="fus-sel">Imagerie de fusion</label><select id="fus-sel" title="Imagerie de fusion">
         ${fusions.map((f,k)=>`<option value="${k}">${esc(f.name)}</option>`).join('')}<option value="" selected>Scanner seul</option></select>
-      <div class="fusmix" hidden><input type="range" id="fus-a" min="0" max="100" value="50" aria-label="Balance scanner / fusion"><span id="fus-l"></span></div>`;
+      <div class="fusmix" hidden><input type="range" id="fus-a" min="0" max="100" value="50" aria-label="Balance scanner / fusion"><span id="fus-l"></span>
+        <details class="fuswin"><summary>Fenêtrage de la fusion</summary>
+          <label for="fus-lo">Seuil bas <b id="fus-lov"></b></label><input type="range" id="fus-lo" min="0" max="100" value="0">
+          <label for="fus-hi">Seuil haut <b id="fus-hiv"></b></label><input type="range" id="fus-hi" min="0" max="100" value="100">
+          <label class="ck"><input type="checkbox" id="fus-hide"> Transparent sous le seuil bas</label>
+          <button class="btn" id="fus-reset">Réinitialiser</button></details></div>`;
     const sel=bar.querySelector('#fus-sel'), mix=bar.querySelector('.fusmix'), rg=bar.querySelector('#fus-a'), lab=bar.querySelector('#fus-l');
+    // fenêtrage : seuils en % de la plage enregistrée (déjà calée sur la série au chargement du dossier)
+    const wlo=bar.querySelector('#fus-lo'), whi=bar.querySelector('#fus-hi'), whide=bar.querySelector('#fus-hide');
+    const remap=F=>{ const lo=1+254*F.lo/100, hi=Math.max(lo+1,1+254*F.hi/100);
+      for(let q=1;q<256;q++){ if(F.hide&&q<lo){ F.map[q]=0; continue; } F.map[q]=Math.max(1,Math.min(255,Math.round(1+(q-lo)/(hi-lo)*254))); } };
+    const winUI=()=>{ const F=FUS.on; if(!F) return; wlo.value=F.lo; whi.value=F.hi; whide.checked=F.hide;
+      bar.querySelector('#fus-lov').textContent=F.lo+' %'; bar.querySelector('#fus-hiv').textContent=F.hi+' %'; };
+    const setWin=()=>{ const F=FUS.on; if(!F) return; F.lo=Math.min(+wlo.value,99); F.hi=Math.max(+whi.value,F.lo+1); F.hide=whide.checked; remap(F); winUI(); drawAll(); };
+    wlo.oninput=setWin; whi.oninput=setWin; whide.onchange=setWin;
+    bar.querySelector('#fus-reset').onclick=()=>{ const F=FUS.on; if(!F) return; F.lo=0; F.hi=100; F.hide=F.pet; remap(F); winUI(); drawAll(); };
     const lbl=()=>{ const f=Math.round(FUS.alpha*100); lab.textContent=`Scanner ${100-f} % · Fusion ${f} %`; };
     rg.oninput=()=>{ FUS.alpha=rg.value/100; lbl(); drawAll(); }; lbl();
-    for(const el of [sel,rg]) ['pointerdown','wheel','keydown'].forEach(t=>el.addEventListener(t,e=>e.stopPropagation()));
+    for(const el of [sel,rg,wlo,whi]) ['pointerdown','wheel','keydown'].forEach(t=>el.addEventListener(t,e=>e.stopPropagation()));
     sel.onchange=async()=>{
       if(sel.value===''){ FUS.on=null; mix.hidden=true; drawAll(); return; }
       const k=+sel.value, f=fusions[k];
       if(!FUS.cache.has(k)){ sel.disabled=true; lab.textContent='Chargement…'; mix.hidden=false;
-        try{ FUS.cache.set(k,{data:await f.load(),cm:cmap(/^(PT|NM)$/.test(f.modality||'')?'hot':'gray')}); }
+        try{ const pet=/^(PT|NM)$/.test(f.modality||''), F={data:await f.load(),cm:cmap(pet?'hot':'gray'),pet,lo:0,hi:100,hide:pet,map:new Uint8Array(256)};
+          remap(F); FUS.cache.set(k,F); }
         catch(e){ sel.disabled=false; sel.value=''; mix.hidden=true; setStatus('L\'imagerie de fusion n\'a pas pu être chargée : '+e.message,'err'); return; }
         sel.disabled=false; }
       if(sel.value!==String(k)) return;
-      FUS.on=FUS.cache.get(k); mix.hidden=false; lbl(); drawAll(); };
+      FUS.on=FUS.cache.get(k); mix.hidden=false; lbl(); winUI(); drawAll(); };
   }
   function srcRect(vw){ const sw=vw.nu/vw.zoom, sh=vw.nv/vw.zoom; return [Math.max(0,Math.min(vw.nu-sw,vw.cx-sw/2)),Math.max(0,Math.min(vw.nv-sh,vw.cy-sh/2)),sw,sh]; }
   function clampCenter(vw){ const [sx,sy,sw,sh]=srcRect(vw); vw.cx=sx+sw/2; vw.cy=sy+sh/2; }
@@ -236,9 +251,9 @@ function open(root,ctx){
 
   function draw(vw){
     const s=pos[vw.slice], d=vw.img.data, o=vw.ovimg.data, act=editing()?ED.st:null, vis=S.filter(x=>x.on||x===act), H0=-DICOM.HU_MIN;
-    const F=FUS.on, fd=F&&F.data, CM=F&&F.cm, fa=FUS.alpha, ca=1-fa;
+    const F=FUS.on, fd=F&&F.data, CM=F&&F.cm, FM=F&&F.map, fa=FUS.alpha, ca=1-fa;
     for(let v=0;v<vw.nv;v++)for(let u=0;u<vw.nu;u++){const [x,y,z]=vw.uv(u,v,s), j=IDX(x,y,z), i=(v*vw.nu+u)*4, g=LUT[vol[j]+H0];
-      const q=fd?fd[j]:0; // fusion en filigrane : mélange pondéré scanner / fusion, hors champ de la fusion = scanner seul
+      const q=fd?FM[fd[j]]:0; // fusion en filigrane : mélange pondéré scanner / fusion ; hors champ (ou sous le seuil masqué) = scanner seul
       if(q){ const k=q*3; d[i]=g*ca+CM[k]*fa; d[i+1]=g*ca+CM[k+1]*fa; d[i+2]=g*ca+CM[k+2]*fa; } else d[i]=d[i+1]=d[i+2]=g;
       d[i+3]=255;}
     o.fill(0);
