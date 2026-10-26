@@ -71,7 +71,7 @@ Pour chaque dossier : tableau des Dice par validation, courbes de progression av
 | `artifact.html` | point d'entrée de la version Artifact (mêmes scripts que `index.html`) |
 | `js/app.js` | menu, chargement des dossiers, mots de passe, navigation |
 | `dossiers/catalogue.json` | dossiers publiés pour tous |
-| `assets/logo-hcl.png` | logo des HCL affiché à côté du titre (à déposer) |
+| `assets/logo-hcl.png` | logo des HCL affiché à côté du titre |
 | `lib/jspdf.umd.min.js` | [jsPDF](https://github.com/parallax/jsPDF) 2.5.2, licence MIT (`lib/jspdf.LICENSE`) |
 
 ## Limites
