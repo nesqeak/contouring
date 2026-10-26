@@ -152,28 +152,39 @@ function open(root,ctx){
   const tip=$('tip'), wrap=$('views');
   for(const vw of VIEWS){
     const el=document.createElement('div'); el.className='view'+(vw.main?' main':''); vw.el=el;
-    el.innerHTML=`<div class="vhead"><span>${vw.name}</span><b></b></div>
-     <div style="position:relative"><canvas></canvas>
+    el.innerHTML=`<div class="vhead"><span>${vw.name}</span>${vw.main?`<span class="zoom" role="group" aria-label="Zoom de la vue axiale">
+       <button class="zb" data-z="-1" title="Dézoomer" aria-label="Dézoomer">−</button><button class="zb zv" data-z="0" title="Revenir à la vue entière">100 %</button><button class="zb" data-z="1" title="Zoomer" aria-label="Zoomer">+</button></span>`:''}<b></b></div>
+     <div class="vimg"><canvas></canvas>${vw.main?'<div class="fusbar" hidden></div>':''}
      <span class="orient" style="top:4px;left:50%;transform:translateX(-50%)">${vw.oriTop}</span>
      <span class="orient" style="bottom:4px;left:50%;transform:translateX(-50%)">${vw.oriBot}</span>
      <span class="orient" style="left:6px;top:50%;transform:translateY(-50%)">${vw.oriL}</span>
      <span class="orient" style="right:6px;top:50%;transform:translateY(-50%)">${vw.oriR}</span></div>
-     <div class="vfoot"><input type="range" min="0" max="${vw.n-1}" aria-label="Coupe ${vw.name.toLowerCase()}"></div>`;
+     <div class="vfoot"><button class="step" data-d="-1" title="Coupe précédente" aria-label="Coupe précédente">‹</button><input type="range" min="0" max="${vw.n-1}" aria-label="Coupe ${vw.name.toLowerCase()}"><button class="step" data-d="1" title="Coupe suivante" aria-label="Coupe suivante">›</button></div>`;
     wrap.appendChild(el);
     vw.cv=el.querySelector('canvas'); vw.ctx=vw.cv.getContext('2d');
     vw.cv.width=Math.round(vw.nu*vw.su*K); vw.cv.height=Math.round(vw.nv*vw.sv*K);
     vw.off=document.createElement('canvas'); vw.off.width=vw.nu; vw.off.height=vw.nv; vw.octx=vw.off.getContext('2d'); vw.img=vw.octx.createImageData(vw.nu,vw.nv);
     vw.ov=document.createElement('canvas'); vw.ov.width=vw.nu; vw.ov.height=vw.nv; vw.ovctx=vw.ov.getContext('2d'); vw.ovimg=vw.ovctx.createImageData(vw.nu,vw.nv);
-    vw.sl=el.querySelector('input'); vw.lab=el.querySelector('.vhead b');
+    vw.sl=el.querySelector('.vfoot input'); vw.lab=el.querySelector('.vhead b');
+    vw.zoom=1; vw.cx=vw.nu/2; vw.cy=vw.nv/2;
+    const step=d=>{ const s=vw.slice; pos[s]=Math.max(0,Math.min(vw.n-1,pos[s]+d)); drawAll(); };
     vw.sl.addEventListener('input',()=>{pos[vw.slice]=+vw.sl.value; drawAll();});
-    vw.cv.addEventListener('wheel',e=>{e.preventDefault(); const s=vw.slice; pos[s]=Math.max(0,Math.min(vw.n-1,pos[s]+(e.deltaY>0?-1:1))); drawAll();},{passive:false});
-    const pickUV=e=>{const r=vw.cv.getBoundingClientRect(); return [(e.clientX-r.left)/r.width*vw.nu,(e.clientY-r.top)/r.height*vw.nv];};
+    el.querySelectorAll('.step').forEach(b=>b.onclick=()=>step(+b.dataset.d));
+    el.querySelectorAll('.zb').forEach(b=>b.onclick=()=>{ const z=+b.dataset.z; setZoom(vw,z?vw.zoom*(z>0?1.5:1/1.5):1); });
+    vw.cv.addEventListener('wheel',e=>{e.preventDefault();
+      if(vw.main&&(e.ctrlKey||e.metaKey)){ const [fu,fv]=pickUV(e); setZoom(vw,vw.zoom*(e.deltaY<0?1.25:0.8),fu,fv); return; }
+      step(e.deltaY>0?-1:1);},{passive:false});
+    // zone de l'image affichée (zoom) : [sx, sy, sw, sh] en voxels de la vue
+    const pickUV=e=>{const r=vw.cv.getBoundingClientRect(), [sx,sy,sw,sh]=srcRect(vw); return [sx+(e.clientX-r.left)/r.width*sw,sy+(e.clientY-r.top)/r.height*sh];};
     const pick=e=>{const [fu,fv]=pickUV(e),u=Math.floor(fu),v=Math.floor(fv);
       if(u<0||v<0||u>=vw.nu||v>=vw.nv) return null; return vw.uv(u,v,pos[vw.slice]);};
+    let pan=null; // déplacement de l'image zoomée : Maj + glisser, ou bouton du milieu
     vw.cv.addEventListener('pointerdown',e=>{
+      if(vw.zoom>1&&(e.shiftKey||e.button===1)){ e.preventDefault(); vw.cv.setPointerCapture(e.pointerId); pan={x:e.clientX,y:e.clientY,cx:vw.cx,cy:vw.cy}; return; }
       if(editing()){ e.preventDefault(); vw.cv.setPointerCapture(e.pointerId); startStroke(vw); paintAt(vw,pickUV(e)); return; }
       const p=pick(e); if(!p)return; [pos.x,pos.y,pos.z]=p; drawAll();});
     vw.cv.addEventListener('pointermove',e=>{
+      if(pan){ const r=vw.cv.getBoundingClientRect(), [,,sw,sh]=srcRect(vw); vw.cx=pan.cx-(e.clientX-pan.x)/r.width*sw; vw.cy=pan.cy-(e.clientY-pan.y)/r.height*sh; clampCenter(vw); draw(vw); return; }
       const fuv=pickUV(e); ED.hover={vw,fuv};
       if(editing()){ if(ED.stroke&&ED.stroke.vw===vw&&e.buttons===1) paintAt(vw,fuv); else draw(vw); tip.hidden=true; return; }
       const p=pick(e); if(!p){tip.hidden=true;return;}
@@ -181,11 +192,43 @@ function open(root,ctx){
       const names=S.filter(s=>s.on&&has(s,...p)).map(s=>`<div style="color:${s.color}">${esc(s.name)}</div>`).join('');
       tip.innerHTML=names+`<div class="hu">${HU(...p)} HU</div>`; tip.hidden=false;
       tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY+14)+'px';});
-    const end=()=>{ if(ED.stroke&&ED.stroke.vw===vw) endStroke(); };
+    const end=()=>{ pan=null; if(ED.stroke&&ED.stroke.vw===vw) endStroke(); };
     vw.cv.addEventListener('pointerup',end); vw.cv.addEventListener('pointercancel',end);
     vw.cv.addEventListener('pointerleave',()=>{tip.hidden=true; if(ED.hover&&ED.hover.vw===vw){ED.hover=null; draw(vw);} });
   }
   const editing=()=>ED.on&&ED.st&&!validated;
+
+  // ---- imageries de fusion : menu en haut à gauche de la vue axiale, balance scanner / fusion ----
+  const FUS={on:null, alpha:.5, cache:new Map()};
+  const CMAPS={gray:i=>[i,i,i], hot:i=>[Math.min(255,i*3),Math.max(0,Math.min(255,i*3-255)),Math.max(0,Math.min(255,i*3-510))]};
+  const cmap=name=>{ const t=new Uint8Array(256*3); for(let i=0;i<256;i++) t.set(CMAPS[name](i),i*3); return t; };
+  const fusions=ctx.fusions||[];
+  if(fusions.length){
+    const bar=VIEWS[0].el.querySelector('.fusbar'); bar.hidden=false;
+    bar.innerHTML=`<label class="sr" for="fus-sel">Imagerie de fusion</label><select id="fus-sel" title="Imagerie de fusion">
+        ${fusions.map((f,k)=>`<option value="${k}">${esc(f.name)}</option>`).join('')}<option value="" selected>Scanner seul</option></select>
+      <div class="fusmix" hidden><input type="range" id="fus-a" min="0" max="100" value="50" aria-label="Balance scanner / fusion"><span id="fus-l"></span></div>`;
+    const sel=bar.querySelector('#fus-sel'), mix=bar.querySelector('.fusmix'), rg=bar.querySelector('#fus-a'), lab=bar.querySelector('#fus-l');
+    const lbl=()=>{ const f=Math.round(FUS.alpha*100); lab.textContent=`Scanner ${100-f} % · Fusion ${f} %`; };
+    rg.oninput=()=>{ FUS.alpha=rg.value/100; lbl(); drawAll(); }; lbl();
+    for(const el of [sel,rg]) ['pointerdown','wheel','keydown'].forEach(t=>el.addEventListener(t,e=>e.stopPropagation()));
+    sel.onchange=async()=>{
+      if(sel.value===''){ FUS.on=null; mix.hidden=true; drawAll(); return; }
+      const k=+sel.value, f=fusions[k];
+      if(!FUS.cache.has(k)){ sel.disabled=true; lab.textContent='Chargement…'; mix.hidden=false;
+        try{ FUS.cache.set(k,{data:await f.load(),cm:cmap(/^(PT|NM)$/.test(f.modality||'')?'hot':'gray')}); }
+        catch(e){ sel.disabled=false; sel.value=''; mix.hidden=true; setStatus('L\'imagerie de fusion n\'a pas pu être chargée : '+e.message,'err'); return; }
+        sel.disabled=false; }
+      if(sel.value!==String(k)) return;
+      FUS.on=FUS.cache.get(k); mix.hidden=false; lbl(); drawAll(); };
+  }
+  function srcRect(vw){ const sw=vw.nu/vw.zoom, sh=vw.nv/vw.zoom; return [Math.max(0,Math.min(vw.nu-sw,vw.cx-sw/2)),Math.max(0,Math.min(vw.nv-sh,vw.cy-sh/2)),sw,sh]; }
+  function clampCenter(vw){ const [sx,sy,sw,sh]=srcRect(vw); vw.cx=sx+sw/2; vw.cy=sy+sh/2; }
+  // zoom de 1 à 8 ; centré sur le point donné, sinon sur le réticule au premier zoom
+  function setZoom(vw,z,fu,fv){ const old=vw.zoom; vw.zoom=Math.max(1,Math.min(8,z));
+    if(fu!=null){ const [sx,sy,sw,sh]=srcRect({...vw,zoom:old}), tx=(fu-sx)/sw, ty=(fv-sy)/sh; vw.cx=fu-(tx-.5)*vw.nu/vw.zoom; vw.cy=fv-(ty-.5)*vw.nv/vw.zoom; }
+    else if(old===1){ vw.cx=pos.x+.5; vw.cy=pos.y+.5; }
+    clampCenter(vw); const zv=vw.el.querySelector('.zv'); if(zv) zv.textContent=Math.round(vw.zoom*100)+' %'; draw(vw); }
 
   function lut(){const lo=preset.L-preset.W/2, hi=preset.L+preset.W/2, n=DICOM.HU_MAX-DICOM.HU_MIN+1, t=new Uint8Array(n);
     for(let i=0;i<n;i++){const h=i+DICOM.HU_MIN; t[i]=Math.max(0,Math.min(255,Math.round((h-lo)/(hi-lo)*255)));} return t;}
@@ -193,7 +236,11 @@ function open(root,ctx){
 
   function draw(vw){
     const s=pos[vw.slice], d=vw.img.data, o=vw.ovimg.data, act=editing()?ED.st:null, vis=S.filter(x=>x.on||x===act), H0=-DICOM.HU_MIN;
-    for(let v=0;v<vw.nv;v++)for(let u=0;u<vw.nu;u++){const [x,y,z]=vw.uv(u,v,s), i=(v*vw.nu+u)*4, g=LUT[vol[IDX(x,y,z)]+H0]; d[i]=d[i+1]=d[i+2]=g; d[i+3]=255;}
+    const F=FUS.on, fd=F&&F.data, CM=F&&F.cm, fa=FUS.alpha, ca=1-fa;
+    for(let v=0;v<vw.nv;v++)for(let u=0;u<vw.nu;u++){const [x,y,z]=vw.uv(u,v,s), j=IDX(x,y,z), i=(v*vw.nu+u)*4, g=LUT[vol[j]+H0];
+      const q=fd?fd[j]:0; // fusion en filigrane : mélange pondéré scanner / fusion, hors champ de la fusion = scanner seul
+      if(q){ const k=q*3; d[i]=g*ca+CM[k]*fa; d[i+1]=g*ca+CM[k+1]*fa; d[i+2]=g*ca+CM[k+2]*fa; } else d[i]=d[i+1]=d[i+2]=g;
+      d[i+3]=255;}
     o.fill(0);
     const a=Math.round(opacity*255);
     const order=act?[act,...vis.filter(x=>x!==act)]:vis;
@@ -201,12 +248,13 @@ function open(root,ctx){
       const al=st===act?Math.max(a,70):(st.id===hotId?Math.min(255,a+90):a); if(!al) continue;
       for(let v=R[2];v<=R[3];v++)for(let u=R[0];u<=R[1];u++){ if(!has(st,...vw.uv(u,v,s))) continue; const i=(v*vw.nu+u)*4; o[i]=st.rgb[0];o[i+1]=st.rgb[1];o[i+2]=st.rgb[2];o[i+3]=al; }}
     vw.octx.putImageData(vw.img,0,0); vw.ovctx.putImageData(vw.ovimg,0,0);
-    const c=vw.ctx, W=vw.cv.width, H=vw.cv.height, pu=W/vw.nu, pv=H/vw.nv;
+    const c=vw.ctx, W=vw.cv.width, H=vw.cv.height, pu=W/vw.nu, pv=H/vw.nv, Z=vw.zoom, [sx,sy]=srcRect(vw);
+    c.setTransform(Z,0,0,Z,-sx*pu*Z,-sy*pv*Z); // tout le tracé se fait ensuite en coordonnées de l'image entière
     c.imageSmoothingEnabled=true; c.drawImage(vw.off,0,0,W,H);
     c.imageSmoothingEnabled=false; c.drawImage(vw.ov,0,0,W,H);
     if(showC||act){
       for(const st of order){ if(!showC&&st!==act) continue; const R=range(vw,st,s); if(!R) continue;
-        c.strokeStyle=st.color; c.lineWidth=(st.id===hotId||st===act)?3:(st.dashed?2:1.6); c.setLineDash(st.dashed?[5,4]:[]); c.beginPath(); let any=false;
+        c.strokeStyle=st.color; c.lineWidth=((st.id===hotId||st===act)?3:(st.dashed?2:1.6))/Z; c.setLineDash(st.dashed?[5/Z,4/Z]:[]); c.beginPath(); let any=false;
         const hs=(uu,vv)=>uu>=0&&vv>=0&&uu<vw.nu&&vv<vw.nv&&has(st,...vw.uv(uu,vv,s));
         for(let v=R[2];v<=R[3];v++)for(let u=R[0];u<=R[1];u++){
           if(!hs(u,v)) continue; any=true; const X=u*pu,Y=v*pv;
@@ -219,13 +267,14 @@ function open(root,ctx){
     }
     if(showX&&!editing()){
       let cu,cv; if(vw.id==='ax'){cu=pos.x;cv=pos.y}else if(vw.id==='co'){cu=pos.x;cv=NZ-1-pos.z}else{cu=pos.y;cv=NZ-1-pos.z}
-      c.strokeStyle='rgba(95,208,196,.55)'; c.lineWidth=1; c.setLineDash([4,4]); c.beginPath();
+      c.strokeStyle='rgba(95,208,196,.55)'; c.lineWidth=1/Z; c.setLineDash([4/Z,4/Z]); c.beginPath();
       c.moveTo((cu+.5)*pu,0);c.lineTo((cu+.5)*pu,H);c.moveTo(0,(cv+.5)*pv);c.lineTo(W,(cv+.5)*pv);c.stroke(); c.setLineDash([]);
     }
     if(editing()&&ED.hover&&ED.hover.vw===vw){ // curseur du pinceau, rayon en mm
-      const [fu,fv]=ED.hover.fuv; c.strokeStyle=ED.tool==='erase'?'#ef6b5e':'#ffffff'; c.lineWidth=1.5;
+      const [fu,fv]=ED.hover.fuv; c.strokeStyle=ED.tool==='erase'?'#ef6b5e':'#ffffff'; c.lineWidth=1.5/Z;
       c.beginPath(); c.ellipse(fu*pu,fv*pv,ED.r*K,ED.r*K,0,0,Math.PI*2); c.stroke();
     }
+    c.setTransform(1,0,0,1,0,0);
     vw.sl.value=s;
     vw.lab.textContent=vw.slice==='z'?`coupe ${s+1}/${NZ}`:`${vw.slice} ${s+1}/${vw.n}`;
     vw.el.classList.toggle('editing',editing());

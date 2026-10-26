@@ -44,9 +44,16 @@ Le script copie les fichiers dans `dossiers/orl-01/` et ajoute le dossier à `do
 
 Dans les deux cas, les contours en cours et l'historique des scores restent propres à chaque utilisateur, dans son navigateur.
 
+### Imageries de fusion
+
+Le formulaire d'ajout accepte, en option, une ou plusieurs imageries de fusion (IRM, TEP…) : pour chacune, un nom affiché, ses images DICOM et son fichier de recalage DICOM REG (Spatial Registration, recalage rigide ou affine ; le recalage déformable est refusé). Le REG peut manquer seulement si la série partage le référentiel (Frame of Reference) du scanner, comme une TEP-TDM. Au chargement, la série est recalée (matrices *Frame of Reference Transformation Matrix* du REG) puis rééchantillonnée en trilinéaire sur la grille du scanner et fenêtrée en 8 bits (percentiles 0,5–99,5 %, 0–99,9 % pour la TEP) ; le dossier garde ce volume rééchantillonné. Le chargement est refusé si le REG ne concerne pas le scanner ou la série, ou si la série ne recoupe pas le scanner après recalage. Les dossiers publiés par `scripts/ajouter_dossier.py` n'ont pas de fusion.
+
+Dans la visionneuse, un menu en haut à gauche de la vue axiale liste les fusions du dossier ; la fusion choisie s'affiche en filigrane sur le scanner dans les trois vues (niveaux de gris, ou échelle « chaude » pour la TEP), avec une barre de balance de Scanner 100 % · Fusion 0 % à Scanner 0 % · Fusion 100 %. La dernière option du menu, « Scanner seul », décharge la fusion.
+
 ### Contourage
 
 - Les structures choisies au chargement sont affichées en lecture seule, sauf les structures cibles : celles-ci sont créées vides et modifiables, et leur contour de référence reste masqué.
+- Vue axiale : boutons − / + pour dézoomer et zoomer (jusqu'à 800 %, ou Ctrl + molette), bouton du pourcentage pour revenir à l'image entière ; Maj + glisser (ou bouton du milieu) pour déplacer l'image zoomée. Chaque barre de coupes a une flèche à chaque extrémité pour avancer ou reculer d'une coupe.
 - Outils repris de la visionneuse d'origine : pinceau et gomme (rayon 1–25 mm), option pour ne pas peindre l'air ni l'os, copie de la coupe voisine, vider la coupe, effacer la structure, annulation (Ctrl+Z).
 - **Interpoler les coupes** (raccourci I) : après avoir contouré une coupe axiale sur deux ou trois, crée les coupes intermédiaires de la structure active. Pour une coupe située à la fraction t entre deux coupes contourées, chaque contour est déplacé de la fraction correspondante du vecteur entre leurs barycentres (la moitié pour la coupe du milieu), puis les deux formes sont fondues par interpolation de cartes de distance signée, ce qui fait aussi évoluer la forme progressivement. Une coupe interpolée retouchée à la main devient une coupe de référence et n'est plus recalculée ; Ctrl+Z annule l'interpolation. Raccourcis : P pinceau, G gomme, I interpoler, `[` et `]` rayon, flèches haut/bas pour la coupe axiale.
 - Les contours en cours sont enregistrés dans le navigateur après chaque tracé et sont repris quand on rouvre le dossier.

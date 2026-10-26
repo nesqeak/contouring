@@ -12,7 +12,7 @@ const T={
   obsSeq:0x30060080, interpType:0x300600A4,
 };
 // séquences connues, utiles en Implicit VR (pas de VR dans le flux)
-const SQ_TAGS=new Set([T.roiSeq,T.contourSeqTop,T.contourSeq,T.obsSeq,0x30060010,0x30060012,0x30060014,0x30060016,0x00081115,0x00081140,0x00081250]);
+const SQ_TAGS=new Set([0x00700308,0x00700309,0x0070030A,0x00640002,T.roiSeq,T.contourSeqTop,T.contourSeq,T.obsSeq,0x30060010,0x30060012,0x30060014,0x30060016,0x00081115,0x00081140,0x00081250]);
 const TS_OK={'1.2.840.10008.1.2':false,'1.2.840.10008.1.2.1':true}; // valeur : VR explicite
 
 function parse(buf){
@@ -88,7 +88,8 @@ const HU_MIN=-1024, HU_MAX=3071;
 
 // Volume CT à partir des fichiers image (ArrayBuffer[]). Les axes sont remis en
 // orientation d'affichage standard : x vers la gauche du patient, y vers l'arrière, z vers le haut.
-function buildVolume(bufs, onProgress){
+// opts.raw : série de fusion (IRM, TEP…) gardée en valeurs brutes (Float32, sans bornage HU).
+function buildVolume(bufs, onProgress, opts={}){
   const series=new Map(); let skipped=0, tsErr=null;
   bufs.forEach((b,k)=>{ let f; try{ f=parse(b); }catch(e){ if(e.code==='ts') tsErr=e; skipped++; return; }
     if(!f.has(T.pixel)||!f.has(T.ipp)||!f.has(T.iop)) return;
@@ -97,7 +98,7 @@ function buildVolume(bufs, onProgress){
     if(onProgress&&k%20===0) onProgress(k/bufs.length); });
   if(!series.size) throw tsErr||new Error('aucune coupe d\'image DICOM lisible');
   // la série CT la plus longue
-  let sl=[...series.values()].sort((a,b)=>(b[0].str(T.modality)==='CT')-(a[0].str(T.modality)==='CT')||b.length-a.length)[0];
+  let sl=[...series.values()].sort((a,b)=>(opts.raw?0:(b[0].str(T.modality)==='CT')-(a[0].str(T.modality)==='CT'))||b.length-a.length)[0];
   const f0=sl[0], NX=f0.u16(T.cols), NY=f0.u16(T.rows), iop=f0.nums(T.iop), r=iop.slice(0,3), c=iop.slice(3,6), n=cross(r,c);
   if(f0.u16(T.bits)!==16) throw new Error('seules les images 16 bits sont prises en charge');
   if(sl.some(f=>f.u16(T.cols)!==NX||f.u16(T.rows)!==NY)) throw new Error('coupes de tailles différentes dans la série');
@@ -107,7 +108,7 @@ function buildVolume(bufs, onProgress){
   const ps=f0.nums(T.ps); const dy=ps[0]||1, dx=ps[1]||ps[0]||1;
   const dzs=sl.slice(1).map((s,i)=>s.k-sl[i].k).sort((a,b)=>a-b); const dz=NZ>1?dzs[dzs.length>>1]:1;
   const flipX=r[0]<0, flipY=c[1]<0, NXY=NX*NY;
-  const vol=new Int16Array(NXY*NZ);
+  const raw=!!opts.raw, vol=raw?new Float32Array(NXY*NZ):new Int16Array(NXY*NZ);
   sl.forEach((s,z)=>{ const f=s.f, e=f.root.get(T.pixel);
     if(e.encapsulated) throw new Error('images compressées non prises en charge');
     const signed=f.u16(T.pixRep)===1, slope=f.num(T.slope,f.root,1), inter=f.num(T.inter,f.root,0);
@@ -116,7 +117,7 @@ function buildVolume(bufs, onProgress){
     else { const cp=f.u8.slice(e.off,e.off+NXY*2); px=signed?new Int16Array(cp.buffer):new Uint16Array(cp.buffer); }
     const base=z*NXY;
     for(let j=0;j<NY;j++){ const y=flipY?NY-1-j:j, o=base+y*NX;
-      for(let i=0;i<NX;i++){ let v=px[j*NX+i]*slope+inter; v=v<HU_MIN?HU_MIN:v>HU_MAX?HU_MAX:v; vol[o+(flipX?NX-1-i:i)]=v; } }
+      for(let i=0;i<NX;i++){ let v=px[j*NX+i]*slope+inter; if(!raw) v=v<HU_MIN?HU_MIN:v>HU_MAX?HU_MAX:v; vol[o+(flipX?NX-1-i:i)]=v; } }
   });
   const o0=sl[0].f.nums(T.ipp), keys=sl.map(s=>s.k);
   // coordonnées patient (mm) -> indices voxel continus (x, y) et coupe la plus proche
@@ -124,7 +125,10 @@ function buildVolume(bufs, onProgress){
     if(flipX) i=NX-1-i; if(flipY) j=NY-1-j; const k=dot(P,n)*sgn;
     let lo=0,hi=NZ-1; while(hi-lo>1){const m=(lo+hi)>>1; if(keys[m]<k) lo=m; else hi=m;}
     const z=Math.abs(keys[lo]-k)<=Math.abs(keys[hi]-k)?lo:hi; return [i,j,z,Math.abs(keys[z]-k)]; };
-  return {NX,NY,NZ,spacing:[dx,dy,dz],vol,toIndex,frameRef:f0.str(T.frameRef),skipped,nFiles:bufs.length};
+  // matrice 4 × 4 (ligne par ligne) des indices voxel (x, y, z) vers les coordonnées patient, coupes supposées équidistantes
+  const sx=flipX?-1:1, sy=flipY?-1:1, ox=flipX?NX-1:0, oy=flipY?NY-1:0, M=[0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1];
+  for(let a=0;a<3;a++){ M[a*4]=sx*dx*r[a]; M[a*4+1]=sy*dy*c[a]; M[a*4+2]=dz*sgn*n[a]; M[a*4+3]=o0[a]+ox*dx*r[a]+oy*dy*c[a]; }
+  return {NX,NY,NZ,spacing:[dx,dy,dz],vol,toIndex,ijk2P:M,frameRef:f0.str(T.frameRef),modality:f0.str(T.modality),description:f0.str(0x0008103E),skipped,nFiles:bufs.length};
 }
 
 // RTSTRUCT : liste des ROI avec nom, couleur et contours (tableaux de points en mm)
@@ -175,6 +179,61 @@ function rasterize(roi,V){
   return {sl,b};
 }
 
+// ---- recalage (DICOM Spatial Registration, REG) et fusion ----
+const I4=[1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+const mul4=(A,B)=>{const C=new Array(16).fill(0); for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0; for(let k=0;k<4;k++) s+=A[i*4+k]*B[k*4+j]; C[i*4+j]=s;} return C;};
+function inv4(m){ // inverse générale (élimination de Gauss)
+  const a=m.slice(), b=I4.slice();
+  for(let c=0;c<4;c++){ let p=c; for(let r=c+1;r<4;r++) if(Math.abs(a[r*4+c])>Math.abs(a[p*4+c])) p=r;
+    if(Math.abs(a[p*4+c])<1e-12) throw new Error('matrice de recalage non inversible');
+    for(let k=0;k<4;k++){ [a[c*4+k],a[p*4+k]]=[a[p*4+k],a[c*4+k]]; [b[c*4+k],b[p*4+k]]=[b[p*4+k],b[c*4+k]]; }
+    const d=a[c*4+c]; for(let k=0;k<4;k++){ a[c*4+k]/=d; b[c*4+k]/=d; }
+    for(let r=0;r<4;r++) if(r!==c){ const f=a[r*4+c]; if(f) for(let k=0;k<4;k++){ a[r*4+k]-=f*a[c*4+k]; b[r*4+k]-=f*b[c*4+k]; } } }
+  return b; }
+// Matrices rigides/affines par référentiel (Frame of Reference) : chacune transforme les coordonnées de son
+// référentiel vers celui de l'objet REG (Frame of Reference Transformation Matrix, 3006,00C6).
+function parseREG(buf){
+  const f=parse(buf);
+  if(f.str(T.sopClass)==='1.2.840.10008.5.1.4.1.1.66.3') throw new Error('recalage déformable non pris en charge (seul le recalage rigide ou affine est accepté)');
+  if(f.str(T.modality)!=='REG') throw new Error('le fichier de recalage n\'est pas un objet REG (modalité '+(f.str(T.modality)||'inconnue')+')');
+  const items=f.seq(0x00700308).map(it=>{ let M=null;
+    for(const mr of f.seq(0x00700309,it)) for(const ms of f.seq(0x0070030A,mr)){ const m=f.nums(0x300600C6,ms); if(m.length===16) M=M?mul4(m,M):m; }
+    return {frameRef:f.str(T.frameRef,it),M:M||I4}; });
+  if(!items.length) throw new Error('le fichier de recalage ne contient aucune matrice');
+  return {frameRef:f.str(T.frameRef),items};
+}
+// transformation des coordonnées patient de la série de fusion vers celles du scanner
+function registration(ct,fus,reg){
+  if(!reg){ if(fus.frameRef&&fus.frameRef===ct.frameRef) return I4; throw new Error('fichier de recalage (REG) requis : la série de fusion n\'est pas dans le référentiel du scanner'); }
+  const itF=reg.items.find(i=>i.frameRef===fus.frameRef), itC=reg.items.find(i=>i.frameRef===ct.frameRef);
+  if(!itF&&fus.frameRef!==ct.frameRef) throw new Error('le recalage ne concerne pas cette série de fusion (référentiel différent)');
+  const Mf=itF?itF.M:(itC?itC.M:I4);
+  let Mc; if(itC) Mc=itC.M; else if(reg.frameRef===ct.frameRef) Mc=I4; else throw new Error('le recalage ne concerne pas le scanner du dossier (référentiel différent)');
+  return mul4(inv4(Mc),Mf);
+}
+// Rééchantillonnage trilinéaire de la série de fusion sur la grille du scanner, fenêtrée en 8 bits :
+// 0 = hors du champ de la série, 1–255 = intensité (percentiles 0,5–99,5 %, ou 0–99,9 % en TEP).
+function resample(ct,fus,Tm,onProgress){
+  const {NX,NY,NZ}=ct, fx=fus.NX, fy=fus.NY, fz=fus.NZ, fv=fus.vol, fxy=fx*fy;
+  const G=mul4(inv4(fus.ijk2P),mul4(inv4(Tm),ct.ijk2P));
+  const smp=[]; for(let i=0;i<fv.length;i+=Math.max(1,Math.floor(fv.length/200000))) smp.push(fv[i]); smp.sort((a,b)=>a-b);
+  const pet=/^(PT|NM)$/.test(fus.modality), q=p=>smp[Math.min(smp.length-1,Math.floor(p*smp.length))];
+  const lo=pet?Math.min(0,q(0)):q(.005), hi=Math.max(lo+1e-6,q(pet?.999:.995)), sc=254/(hi-lo);
+  const out=new Uint8Array(NX*NY*NZ);
+  for(let z=0;z<NZ;z++){ for(let y=0;y<NY;y++){
+      let a=G[2]*z+G[1]*y+G[3], b=G[6]*z+G[5]*y+G[7], c=G[10]*z+G[9]*y+G[11]; const o=(z*NY+y)*NX;
+      for(let x=0;x<NX;x++,a+=G[0],b+=G[4],c+=G[8]){
+        if(a<0||b<0||c<0||a>fx-1||b>fy-1||c>fz-1) continue;
+        const i0=Math.min(fx-2,a|0), j0=Math.min(fy-2,b|0), k0=Math.min(fz-2,c|0), u=a-i0, v=b-j0, w=c-k0;
+        let val;
+        if(fz<2||fy<2||fx<2) val=fv[(Math.round(c)*fy+Math.round(b))*fx+Math.round(a)];
+        else { const p=(k0*fy+j0)*fx+i0;
+          val=(1-w)*((1-v)*((1-u)*fv[p]+u*fv[p+1])+v*((1-u)*fv[p+fx]+u*fv[p+fx+1]))+w*((1-v)*((1-u)*fv[p+fxy]+u*fv[p+fxy+1])+v*((1-u)*fv[p+fxy+fx]+u*fv[p+fxy+fx+1])); }
+        let g=1+(val-lo)*sc; out[o+x]=g<1?1:g>255?255:g; } }
+    if(onProgress) onProgress((z+1)/NZ); }
+  return out;
+}
+
 const normName=s=>String(s||'').trim().toLowerCase();
-window.DICOM={parse,buildVolume,parseRTSS,rasterize,normName,HU_MIN,HU_MAX};
+window.DICOM={parse,buildVolume,parseRTSS,rasterize,normName,parseREG,registration,resample,HU_MIN,HU_MAX};
 })();

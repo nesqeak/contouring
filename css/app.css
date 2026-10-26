@@ -163,3 +163,17 @@ ul.list li:not(.here) .nm{color:var(--muted)}
 .stab tr.all td{background:var(--panel2);font-size:.8rem;color:var(--muted);border-bottom:1px solid var(--line)}
 .stab tr.all label{cursor:pointer}
 .tag{display:inline-block;font-size:.7rem;font-weight:500;color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:0 5px;margin-left:6px;vertical-align:2px}
+.vimg{position:relative;overflow:hidden}
+.vfoot{display:flex;align-items:center;gap:6px}
+.step,.zb{font:inherit;font-size:1rem;line-height:1;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:3px;min-width:28px;height:26px;padding:0 6px;cursor:pointer;flex:none}
+.step:hover,.zb:hover{border-color:var(--accent);color:var(--accent)}
+.zoom{display:inline-flex;gap:3px;margin-left:auto;margin-right:8px;text-transform:none;letter-spacing:0}
+.zb.zv{font-family:var(--f-data);font-size:.72rem;min-width:52px}
+.fusions{display:grid;gap:8px}
+.fusion{border:1px solid var(--line);border-radius:4px;padding:8px;display:grid;gap:6px;background:var(--panel2)}
+.fusion .fhead{display:flex;gap:6px}
+.fusbar{position:absolute;top:6px;left:6px;z-index:2;display:grid;gap:4px;background:rgba(13,17,20,.82);border:1px solid var(--line);border-radius:4px;padding:5px 7px;max-width:calc(100% - 12px)}
+.fusbar select{font:inherit;font-size:.8rem;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:2px 4px;max-width:240px}
+.fusmix{display:grid;gap:2px;min-width:180px}
+.fusmix span{font-family:var(--f-data);font-size:.68rem;color:var(--muted)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}

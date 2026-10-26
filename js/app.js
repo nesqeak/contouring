@@ -44,7 +44,9 @@ async function loadCase(d,progress,msg){
   if(d.source==='shared') return shared.load(d,progress);
   const files=await dossierFiles(d,progress);
   msg('Reconstruction du volume et des structures…'); await new Promise(r=>setTimeout(r,30));
-  return {V:DICOM.buildVolume(files.images),rois:DICOM.parseRTSS(files.rtss).rois};
+  const fus=(d.source==='local'&&(await Store.getFiles(d.id)).fusions)||[];
+  return {V:DICOM.buildVolume(files.images),rois:DICOM.parseRTSS(files.rtss).rois,
+    fusions:fus.map(f=>({name:f.name,modality:f.modality,load:async()=>new Uint8Array(await f.data.arrayBuffer())}))};
 }
 // fichiers DICOM du dossier sous forme d'ArrayBuffer
 async function dossierFiles(d,progress){
@@ -157,7 +159,8 @@ async function shareLocal(d,btn){
     const V=DICOM.buildVolume(await Promise.all(f.images.map(b=>b.arrayBuffer()))), rs=DICOM.parseRTSS(await f.rtss.arrayBuffer());
     const keep=d.structures&&new Set([...d.structures,...d.targets].map(DICOM.normName));
     const {source,...meta}=d; void source;
-    await shared.add(meta,V,keep?rs.rois.filter(r=>keep.has(DICOM.normName(r.name))):rs.rois,f.pdf,p=>btn.textContent='Envoi… '+Math.round(p*100)+' %');
+    const fus=await Promise.all((f.fusions||[]).map(async x=>({name:x.name,modality:x.modality,data:new Uint8Array(await x.data.arrayBuffer())})));
+    await shared.add(meta,V,keep?rs.rois.filter(r=>keep.has(DICOM.normName(r.name))):rs.rois,f.pdf,p=>btn.textContent='Envoi… '+Math.round(p*100)+' %',fus);
     await Store.removeDossierFiles(d.id);
     renderHome();
   }catch(e){ btn.disabled=false; btn.textContent=t; await message('Mise en partage impossible',e.message); }
@@ -177,6 +180,10 @@ function uploadForm(){
       <label class="btn" for="u-rt">Choisir le fichier…</label><input type="file" id="u-rt" hidden></div><div class="info">Aucun fichier sélectionné</div></div></div>
     <div class="field"><span class="lab">Histoire clinique (PDF)</span><div class="drop" id="d-pdf"><div class="pick">
       <label class="btn" for="u-pdf">Choisir le fichier…</label><input type="file" id="u-pdf" accept="application/pdf,.pdf" hidden></div><div class="info">Aucun fichier sélectionné</div></div></div>
+    <div class="field"><span class="lab">Imageries de fusion <span class="hint">(facultatif)</span></span>
+      <div class="hint">Pour chaque série (IRM, TEP…) : ses images DICOM et le fichier de recalage (REG) vers le scanner. Le REG peut être omis si la série partage le référentiel du scanner (TEP-TDM par exemple).</div>
+      <div class="fusions" id="u-fus"></div>
+      <div><button class="btn" id="u-addf">+ Ajouter une imagerie de fusion</button></div></div>
     <div class="field"><span class="lab">Structures du fichier structure</span>
       <div class="hint" id="u-shint">Chargez le fichier structure pour choisir les structures du dossier.</div>
       <div class="tscroll" id="u-swrap" hidden><table class="stab"><thead><tr><th>Structure</th><th>Structure à charger</th><th>Structure cible</th></tr><tr class="all"><td><label for="u-all">Tout cocher / tout décocher</label></td><td><input type="checkbox" id="u-all" aria-label="Charger toutes les structures"></td><td></td></tr></thead><tbody id="u-structs"></tbody></table></div></div>
@@ -213,6 +220,21 @@ function uploadForm(){
     if(!F.rtss) return;
     try{ F.rs=DICOM.parseRTSS(await F.rtss.arrayBuffer()); showStructs(F.rs.rois); }
     catch(err){ m.$('#u-shint').textContent='Fichier structure illisible : '+err.message; } };
+  // imageries de fusion : nom, images DICOM, recalage REG
+  const FUS=[], fl=m.$('#u-fus');
+  m.$('#u-addf').onclick=()=>{ const f={images:[],reg:null}, k=FUS.length; FUS.push(f);
+    const box=document.createElement('div'); box.className='fusion';
+    box.innerHTML=`<div class="fhead"><input type="text" placeholder="Nom affiché (ex. IRM T1 gadolinium)" aria-label="Nom de l'imagerie de fusion"><button class="btn" title="Retirer cette imagerie" aria-label="Retirer">×</button></div>
+      <div class="drop" data-img><div class="pick"><label class="btn" for="f-img${k}">Images DICOM…</label><input type="file" id="f-img${k}" multiple hidden>
+        <label class="btn" for="f-dir${k}">Dossier…</label><input type="file" id="f-dir${k}" webkitdirectory multiple hidden></div><div class="info">Aucune image sélectionnée</div></div>
+      <div class="drop" data-reg><div class="pick"><label class="btn" for="f-reg${k}">Fichier de recalage (REG)…</label><input type="file" id="f-reg${k}" hidden></div><div class="info">Aucun fichier de recalage</div></div>`;
+    f.box=box; f.nameEl=box.querySelector('input[type=text]');
+    const setI=files=>{ f.images=[...files].filter(x=>!/^\./.test(x.name)&&!/\.(pdf|txt|xml|json|jpg|png)$/i.test(x.name)); const d=box.querySelector('[data-img]');
+      d.querySelector('.info').textContent=f.images.length?`${f.images.length} fichier(s) · ${(f.images.reduce((a,x)=>a+x.size,0)/1048576).toFixed(1)} Mo`:'Aucune image sélectionnée'; d.classList.toggle('ok',f.images.length>0); };
+    box.querySelector('#f-img'+k).onchange=e=>setI(e.target.files); box.querySelector('#f-dir'+k).onchange=e=>setI(e.target.files);
+    box.querySelector('#f-reg'+k).onchange=e=>{ f.reg=e.target.files[0]||null; const d=box.querySelector('[data-reg]'); d.querySelector('.info').textContent=f.reg?f.reg.name:'Aucun fichier de recalage'; d.classList.toggle('ok',!!f.reg); };
+    box.querySelector('.fhead button').onclick=()=>{ f.removed=true; box.remove(); };
+    fl.appendChild(box); f.nameEl.focus(); };
   m.$('#u-pdf').onchange=e=>{ F.pdf=e.target.files[0]||null; info('#d-pdf',F.pdf?F.pdf.name:'Aucun fichier sélectionné',!!F.pdf); };
   m.$('#u-cancel').onclick=m.close;
   const showErr=errs=>{ const b=m.$('#u-err'); b.innerHTML='<b>Le dossier ne peut pas être chargé :</b><ul>'+errs.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>'; b.hidden=false; b.scrollIntoView({block:'nearest'}); };
@@ -232,6 +254,8 @@ function uploadForm(){
     const names=tgt.map(tr=>F.rs.rois[tr.dataset.k].name), dup=names.filter((t,i)=>names.findIndex(x=>DICOM.normName(x)===DICOM.normName(t))!==i);
     if(dup.length) errs.push('Plusieurs structures cibles portent le même nom : '+[...new Set(dup)].join(', ')+'.');
     if(!pw) errs.push('Le mot de passe d\'ouverture du dossier est manquant.');
+    const fusIn=FUS.filter(f=>!f.removed);
+    fusIn.forEach((f,i)=>{ if(!f.images.length) errs.push(`Imagerie de fusion n° ${i+1} : aucune image DICOM n'est chargée.`); });
     if(errs.length) return showErr(errs);
     // contrôle du contenu : images lisibles, RTSTRUCT lisible, cibles présentes et sur les images
     const ok=m.$('#u-ok'); ok.disabled=true; ok.textContent='Vérification des fichiers…'; m.$('#u-err').hidden=true;
@@ -239,14 +263,26 @@ function uploadForm(){
       let V; const rois=sel.map(tr=>F.rs.rois[tr.dataset.k]), targets=tgt.map(tr=>F.rs.rois[tr.dataset.k]);
       try{ V=DICOM.buildVolume(await Promise.all(F.images.map(f=>f.arrayBuffer()))); }catch(e){ errs.push('Images DICOM illisibles : '+e.message); }
       if(V) for(const r of targets) if(DICOM.rasterize(r,V).b[1]<0) errs.push(`La structure cible « ${r.name} » ne recoupe pas les images chargées (contour vide ou série différente).`);
+      // fusions : lecture, recalage, rééchantillonnage sur la grille du scanner
+      const fusions=[];
+      if(V) for(const [i,f] of fusIn.entries()){ const lab=`Imagerie de fusion n° ${i+1}`;
+        try{ ok.textContent=`Recalage de la fusion ${i+1}…`; await new Promise(r=>setTimeout(r,20));
+          const FV=DICOM.buildVolume(await Promise.all(f.images.map(x=>x.arrayBuffer())),null,{raw:true});
+          const reg=f.reg?DICOM.parseREG(await f.reg.arrayBuffer()):null;
+          const data=DICOM.resample(V,FV,DICOM.registration(V,FV,reg));
+          let n=0; for(let j=0;j<data.length;j+=97) if(data[j]) n++;
+          if(!n) throw new Error('après recalage, la série ne recoupe pas le scanner');
+          fusions.push({name:f.nameEl.value.trim()||[FV.modality,FV.description].filter(Boolean).join(' · ')||lab,modality:FV.modality,data}); }
+        catch(e){ errs.push(`${lab} : ${e.message}.`); } }
       if(errs.length) return showErr(errs);
       const d={id:'loc-'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),title,category,targets:targets.map(r=>r.name),structures:rois.map(r=>r.name),pwHash:await Store.sha256(pw),created:new Date().toISOString(),
-        dims:[V.NX,V.NY,V.NZ]};
+        dims:[V.NX,V.NY,V.NZ],fusions:fusions.map(f=>({name:f.name,modality:f.modality}))};
       if(shared){ ok.textContent='Envoi… 0 %';
-        await shared.add(d,V,rois,F.pdf,p=>ok.textContent='Envoi… '+Math.round(p*100)+' %');
+        await shared.add(d,V,rois,F.pdf,p=>ok.textContent='Envoi… '+Math.round(p*100)+' %',fusions);
         m.close(); renderHome(); return; }
       ok.textContent='Enregistrement…';
-      await Store.addDossier(d,{images:F.images.map(f=>new Blob([f],{type:'application/dicom'})),rtss:new Blob([F.rtss],{type:'application/dicom'}),pdf:new Blob([F.pdf],{type:'application/pdf'})});
+      await Store.addDossier(d,{images:F.images.map(f=>new Blob([f],{type:'application/dicom'})),rtss:new Blob([F.rtss],{type:'application/dicom'}),pdf:new Blob([F.pdf],{type:'application/pdf'}),
+        fusions:fusions.map(f=>({name:f.name,modality:f.modality,data:new Blob([f.data])}))});
       m.close(); renderHome();
     }catch(e){ showErr([(shared?'Envoi impossible : ':'Enregistrement impossible dans ce navigateur : ')+e.message]); }
     finally{ ok.disabled=false; ok.textContent='Valider le chargement'; }
@@ -266,13 +302,13 @@ async function renderViewer(id){
   page.innerHTML='<div class="loading"><div id="lmsg">Chargement des images…</div><div class="bar"><i></i></div></div>';
   const bar=page.querySelector('.bar i'), msg=page.querySelector('#lmsg');
   try{
-    const {V,rois}=await loadCase(d,p=>bar.style.width=(p*90).toFixed(0)+'%',t=>msg.textContent=t);
+    const {V,rois,fusions}=await loadCase(d,p=>bar.style.width=(p*90).toFixed(0)+'%',t=>msg.textContent=t);
     const draft=await Store.getDraft(d.id).catch(()=>null);
     if(path!=='contourage/'+encodeURIComponent(id)) return; // l'utilisateur est parti entre-temps
     page.innerHTML='';
     // seules les structures choisies au chargement (toutes pour un dossier sans liste) ; les cibles en font partie
     const keep=d.structures&&new Set([...d.structures,...d.targets].map(DICOM.normName));
-    current=Viewer.open(page,{dossier:d,V,rois:keep?rois.filter(r=>keep.has(DICOM.normName(r.name))):rois,draft,pdfUrl:await pdfUrl(d).catch(()=>null),
+    current=Viewer.open(page,{dossier:d,V,fusions:fusions||[],rois:keep?rois.filter(r=>keep.has(DICOM.normName(r.name))):rois,draft,pdfUrl:await pdfUrl(d).catch(()=>null),
       saveDraft:v=>Store.putDraft(d.id,v),
       confirm:confirmBox,
       onValidated:async scores=>{ await Store.addResult(d.id,{date:new Date().toISOString(),scores:scores.map(s=>({name:s.name,dice:s.dice,volUser:s.volUser,volRef:s.volRef}))});
