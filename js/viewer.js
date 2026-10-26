@@ -61,9 +61,10 @@ function open(root,ctx){
         <button class="btn" id="ecopydn" title="Recopier ici le contour de la coupe axiale en dessous">Copier coupe inf.</button>
         <button class="btn" id="eclear">Vider la coupe</button>
       </div>
+      <div class="tools"><button class="btn" id="einterp" title="Créer les coupes axiales manquantes entre deux coupes contourées (raccourci I)">Interpoler les coupes</button></div>
       <div class="tools"><button class="btn danger" id="ewipe" title="Effacer la structure sur toutes les coupes (Ctrl+Z pour annuler)">Effacer toute la structure</button><span id="ewipe-confirm" hidden><button class="btn danger" id="ewipe-yes">Effacer</button> <button class="btn" id="ewipe-no">Garder</button></span></div>
       <div class="status" id="estatus">Les contours en cours sont enregistrés dans ce navigateur après chaque tracé.</div>
-      <div class="hint">Peindre dans une vue modifie la coupe affichée. Raccourcis : P pinceau, G gomme, [ et ] rayon, Ctrl+Z annuler, flèches haut/bas pour changer de coupe axiale.</div>
+      <div class="hint">Peindre dans une vue modifie la coupe affichée. Interpoler : contourer une coupe sur deux ou trois, puis remplir les coupes intermédiaires ; une coupe retouchée à la main n'est plus recalculée. Raccourcis : P pinceau, G gomme, I interpoler, [ et ] rayon, Ctrl+Z annuler, flèches haut/bas pour changer de coupe axiale.</div>
     </section>
     <section class="dice" id="dice" hidden></section>
     <section>
@@ -99,7 +100,7 @@ function open(root,ctx){
   });
   dossier.targets.forEach((t,k)=>{
     const key=DICOM.normName(t), ref=refTargets.find(x=>x.key===key);
-    targets.push(mk({g:'U',id:'u'+k,key,name:t,color:ref?.color,editable:true,sl:new Array(NZ).fill(null),b:emptyBox()}));
+    targets.push(mk({g:'U',id:'u'+k,key,name:t,color:ref?.color,editable:true,sl:new Array(NZ).fill(null),b:emptyBox(),interp:new Set()}));
   });
   let S=[...targets,...refs];
   const byId={}; [...targets,...refs,...refTargets].forEach(s=>byId[s.id]=s);
@@ -122,13 +123,14 @@ function open(root,ctx){
         if(x1<0) return; const w=x1-x0+1,h=y1-y0+1,by=new Uint8Array((w*h+7)>>3); let i=0;
         for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++,i++) if(s.m[y*NX+x]) by[i>>3]|=1<<(i&7);
         arr.push({z,x0,y0,w,h,bits:by}); });
-      out.structs[st.name]=arr; }
+      out.structs[st.name]=arr; (out.interp||(out.interp={}))[st.name]=[...st.interp]; }
     return out;}
   function loadDraft(d){
     if(!d||d.version!==1||d.dims+''!==[NX,NY,NZ]+'') return false; let any=false;
     for(const st of targets){ const arr=d.structs[st.name]; if(!arr) continue;
       for(const p of arr){ const s=fullSlice(st,p.z);
-        for(let i=0;i<p.w*p.h;i++) if((p.bits[i>>3]>>(i&7))&1){const x=p.x0+i%p.w,y=p.y0+((i/p.w)|0); s.m[y*NX+x]=1; growBox(st,x,y,p.z); any=true;} } }
+        for(let i=0;i<p.w*p.h;i++) if((p.bits[i>>3]>>(i&7))&1){const x=p.x0+i%p.w,y=p.y0+((i/p.w)|0); s.m[y*NX+x]=1; growBox(st,x,y,p.z); any=true;} }
+      for(const z of (d.interp&&d.interp[st.name])||[]) st.interp.add(z); }
     return any;}
 
   // ---- état ----
@@ -231,6 +233,8 @@ function open(root,ctx){
   function drawAll(){VIEWS.forEach(draw); refreshList();}
 
   // ---- pinceau ----
+  // une coupe modifiée à la main n'est plus une coupe interpolée (elle devient une coupe clé)
+  function markManual(st,z){ if(!st.interp.has(z)) return; if(ED.stroke&&!ED.stroke.interpPrev) ED.stroke.interpPrev=new Set(st.interp); st.interp.delete(z); }
   function startStroke(vw){ ED.stroke={vw,st:ED.st,changes:new Map()}; }
   function paintAt(vw,[fu,fv]){
     const st=ED.stroke?.st; if(!st) return; const s=pos[vw.slice], val=ED.tool==='paint'?1:0;
@@ -242,7 +246,7 @@ function open(root,ctx){
       if(val&&ED.soft){const g=vol[i]; if(g<AIR||g>BONE) continue;}
       const old=getV(st,i); if(old===val) continue;
       if(!ED.stroke.changes.has(i)) ED.stroke.changes.set(i,old);
-      setV(st,i,val); if(val) growBox(st,x,y,z);
+      setV(st,i,val); if(val) growBox(st,x,y,z); markManual(st,z);
     }
     ED.hover={vw,fuv:[fu,fv]}; draw(vw);
   }
@@ -253,17 +257,64 @@ function open(root,ctx){
   }
   function undo(){ if(validated) return; const k=ED.undo.pop(); if(!k) return;
     for(const [i,old] of k.changes){ setV(k.st,i,old); if(old) growBox(k.st,i%NX,((i/NX)|0)%NY,(i/NXY)|0); }
+    if(k.interpPrev) k.st.interp=k.interpPrev;
     markDirty(k.st); drawAll(); updEdit();}
   function wipeStruct(){
-    const st=ED.st; if(!st) return; const k={vw:VIEWS[0],st,changes:new Map()};
+    const st=ED.st; if(!st) return; const k={vw:VIEWS[0],st,changes:new Map(),interpPrev:new Set(st.interp)}; st.interp.clear();
     st.sl.forEach((s,z)=>{ if(!s) return; for(let j=0;j<NXY;j++) if(s.m[j]){k.changes.set(z*NXY+j,1); s.m[j]=0;} });
     st.b=emptyBox();
     if(k.changes.size){ED.undo.push(k); markDirty(st);} drawAll(); updEdit();
     setStatus(`${st.name} : structure effacée (Ctrl+Z pour annuler).`,'dirty');}
   function sliceOp(fn){ // opération sur la coupe axiale courante de la structure active
-    const st=ED.st; if(!st) return; const k={vw:VIEWS[0],st,changes:new Map()}, z=pos.z;
+    const st=ED.st; if(!st) return; const k={vw:VIEWS[0],st,changes:new Map(),interpPrev:new Set(st.interp)}, z=pos.z; st.interp.delete(z);
     for(let y=0;y<NY;y++)for(let x=0;x<NX;x++){const i=IDX(x,y,z), nv=fn(x,y,z), ov=getV(st,i); if(nv===ov) continue; k.changes.set(i,ov); setV(st,i,nv); if(nv) growBox(st,x,y,z);}
     if(k.changes.size){ED.undo.push(k); markDirty(st);} drawAll(); updEdit();}
+
+  // ---- interpolation entre coupes axiales ----
+  // Morphing par cartes de distance signée : pour une coupe à la fraction t entre deux coupes clés A et B,
+  // chaque forme est translatée vers le barycentre intermédiaire cA + t·(cB − cA), puis les distances
+  // signées sont mélangées, (1 − t)·dA + t·dB, et la coupe garde les pixels où le mélange est négatif.
+  const INF=1e20;
+  function edt1d(f,n,s2,d,v,zz){ let k=0; v[0]=0; zz[0]=-Infinity; zz[1]=Infinity;
+    for(let q=1;q<n;q++){ let sv;
+      for(;;){ const p=v[k]; sv=((f[q]+s2*q*q)-(f[p]+s2*p*p))/(2*s2*(q-p)); if(sv<=zz[k]) k--; else break; }
+      k++; v[k]=q; zz[k]=sv; zz[k+1]=Infinity; }
+    k=0; for(let q=0;q<n;q++){ while(zz[k+1]<q) k++; const p=v[k]; d[q]=s2*(q-p)*(q-p)+f[p]; } }
+  // distance euclidienne (mm) au pixel le plus proche où m[i] === val, sur une grille w × h
+  function edt(m,val,w,h){ const g=new Float64Array(w*h), n=Math.max(w,h), f=new Float64Array(n), d=new Float64Array(n), v=new Int32Array(n), zz=new Float64Array(n+1);
+    for(let i=0;i<w*h;i++) g[i]=m[i]===val?0:INF;
+    for(let x=0;x<w;x++){ for(let y=0;y<h;y++) f[y]=g[y*w+x]; edt1d(f,h,DY*DY,d,v,zz); for(let y=0;y<h;y++) g[y*w+x]=d[y]; }
+    for(let y=0;y<h;y++){ for(let x=0;x<w;x++) f[x]=g[y*w+x]; edt1d(f,w,DX*DX,d,v,zz); for(let x=0;x<w;x++) g[y*w+x]=Math.sqrt(d[x]); }
+    return g; }
+  function sliceInfo(s){ let n=0,sx=0,sy=0,x0=NX,x1=-1,y0=NY,y1=-1;
+    for(let y=0;y<NY;y++){ const o=y*NX; for(let x=0;x<NX;x++) if(s.m[o+x]){n++;sx+=x;sy+=y;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;} }
+    return n?{n,cx:sx/n,cy:sy/n,b:[x0,x1,y0,y1]}:null; }
+  function interpolate(){
+    const st=ED.st; if(!st||validated) return;
+    const info=st.sl.map((s,z)=>s&&!st.interp.has(z)?sliceInfo(s):null), keys=[];
+    info.forEach((v,z)=>{ if(v) keys.push(z); });
+    if(keys.length<2){ setStatus('Interpolation : contourer au moins deux coupes axiales de '+st.name+'.','err'); return; }
+    const k={vw:VIEWS[0],st,changes:new Map(),interpPrev:new Set(st.interp)}; let made=0;
+    for(let q=0;q+1<keys.length;q++){ const a=keys[q], b=keys[q+1]; if(b-a<2) continue;
+      const A=info[a], B=info[b], sh=Math.ceil(Math.hypot(B.cx-A.cx,B.cy-A.cy))+4;
+      // calcul restreint à la boîte commune des deux coupes, élargie du déplacement
+      const X0=Math.max(0,Math.min(A.b[0],B.b[0])-sh), X1=Math.min(NX-1,Math.max(A.b[1],B.b[1])+sh), Y0=Math.max(0,Math.min(A.b[2],B.b[2])-sh), Y1=Math.min(NY-1,Math.max(A.b[3],B.b[3])+sh);
+      const w=X1-X0+1, h=Y1-Y0+1, crop=s=>{ const c=new Uint8Array(w*h); for(let y=0;y<h;y++) c.set(s.m.subarray((Y0+y)*NX+X0,(Y0+y)*NX+X0+w),y*w); return c; };
+      const sdf=s=>{ const c=crop(s), o=edt(c,1,w,h), i=edt(c,0,w,h); for(let j=0;j<w*h;j++) o[j]-=i[j]; return o; };
+      const dA=sdf(st.sl[a]), dB=sdf(st.sl[b]);
+      const at=(d,x,y)=>x<0||y<0||x>=w||y>=h?INF:d[y*w+x];
+      for(let z=a+1;z<b;z++){ const t=(z-a)/(b-a), cx=A.cx+t*(B.cx-A.cx), cy=A.cy+t*(B.cy-A.cy);
+        const ax=Math.round(cx-A.cx), ay=Math.round(cy-A.cy), bx=Math.round(cx-B.cx), by=Math.round(cy-B.cy);
+        for(let y=0;y<NY;y++)for(let x=0;x<NX;x++){ const i=IDX(x,y,z);
+          const u=x-X0, v=y-Y0, inside=u>=0&&v>=0&&u<w&&v<h&&(1-t)*at(dA,u-ax,v-ay)+t*at(dB,u-bx,v-by)<0, nv=inside?1:0, ov=getV(st,i);
+          if(nv===ov) continue; k.changes.set(i,ov); setV(st,i,nv); if(nv) growBox(st,x,y,z); }
+        st.interp.add(z); made++; }
+    }
+    if(!made){ setStatus('Interpolation : aucune coupe à créer entre les coupes contourées de '+st.name+'.'); return; }
+    if(k.changes.size){ ED.undo.push(k); markDirty(st); }
+    drawAll(); updEdit();
+    setStatus(`${st.name} : ${made} coupe${made>1?'s':''} interpolée${made>1?'s':''} (Ctrl+Z pour annuler).`,'dirty');
+  }
 
   // ---- enregistrement local des contours en cours ----
   let saveTimer=null, saving=false, pending=false;
@@ -319,7 +370,7 @@ function open(root,ctx){
   function updEdit(){
     $('edit').classList.toggle('on',ED.on);
     const dis=!ED.on||!targets.length;
-    ['estruct','erad','esoft','ecopyup','ecopydn','eclear'].forEach(i=>$(i).disabled=dis);
+    ['estruct','erad','esoft','ecopyup','ecopydn','eclear','einterp'].forEach(i=>$(i).disabled=dis);
     $('ewipe').disabled=dis||!ED.st||ED.st.b[1]<ED.st.b[0];
     [...$('etool').children].forEach(b=>{b.disabled=dis;b.setAttribute('aria-pressed',b.dataset.t===ED.tool);});
     $('eundo').disabled=dis||!ED.undo.length; $('eradv').textContent=ED.r+' mm';
@@ -333,6 +384,7 @@ function open(root,ctx){
   $('ecopyup').onclick=()=>{ if(pos.z>=NZ-1)return; const st=ED.st; sliceOp((x,y,z)=>getV(st,IDX(x,y,z+1))); };
   $('ecopydn').onclick=()=>{ if(pos.z<=0)return; const st=ED.st; sliceOp((x,y,z)=>getV(st,IDX(x,y,z-1))); };
   $('eclear').onclick=()=>sliceOp(()=>0);
+  $('einterp').onclick=interpolate;
   $('ewipe').onclick=()=>{$('ewipe').hidden=true;$('ewipe-confirm').hidden=false;};
   $('ewipe-no').onclick=()=>{$('ewipe').hidden=false;$('ewipe-confirm').hidden=true;};
   $('ewipe-yes').onclick=()=>{$('ewipe').hidden=false;$('ewipe-confirm').hidden=true; wipeStruct();};
@@ -342,6 +394,7 @@ function open(root,ctx){
       e.preventDefault(); pos.z=Math.max(0,Math.min(NZ-1,pos.z+(e.key==='ArrowUp'?1:-1))); drawAll(); return; }
     if(!editing()||e.target.closest&&e.target.closest('select,input[type=range]')&&!(e.ctrlKey||e.metaKey)) return;
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undo();}
+    else if(e.key==='i'||e.key==='I'){interpolate();}
     else if(e.key==='p'||e.key==='P'){ED.tool='paint';updEdit();} else if(e.key==='g'||e.key==='G'){ED.tool='erase';updEdit();}
     else if(e.key==='['){ED.r=Math.max(1,ED.r-1);$('erad').value=ED.r;updEdit();} else if(e.key===']'){ED.r=Math.min(25,ED.r+1);$('erad').value=ED.r;updEdit();}
     if(ED.hover) draw(ED.hover.vw);}

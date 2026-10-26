@@ -155,7 +155,7 @@ function uploadForm(){
       <label class="btn" for="u-pdf">Choisir le fichier…</label><input type="file" id="u-pdf" accept="application/pdf,.pdf" hidden></div><div class="info">Aucun fichier sélectionné</div></div></div>
     <div class="field"><span class="lab">Structures du fichier structure</span>
       <div class="hint" id="u-shint">Chargez le fichier structure pour choisir les structures du dossier.</div>
-      <div class="tscroll" id="u-swrap" hidden><table class="stab"><thead><tr><th>Structure</th><th>Structure à charger</th><th>Structure cible</th></tr></thead><tbody id="u-structs"></tbody></table></div></div>
+      <div class="tscroll" id="u-swrap" hidden><table class="stab"><thead><tr><th>Structure</th><th>Structure à charger</th><th>Structure cible</th></tr><tr class="all"><td><label for="u-all">Tout cocher / tout décocher</label></td><td><input type="checkbox" id="u-all" aria-label="Charger toutes les structures"></td><td></td></tr></thead><tbody id="u-structs"></tbody></table></div></div>
     <div class="field"><label for="u-pw">Mot de passe d'ouverture du dossier</label><input type="password" id="u-pw" autocomplete="new-password"></div>
     <div class="errors" id="u-err" hidden></div>
     <div class="actions"><button class="btn" id="u-cancel">Annuler</button><button class="btn primary" id="u-ok">Valider le chargement</button></div>`,{wide:true});
@@ -170,9 +170,16 @@ function uploadForm(){
         <td><input type="checkbox" data-load ${empty?'':'checked'} aria-label="Charger ${esc(r.name)}"></td>
         <td><input type="checkbox" data-target ${empty?'disabled':''} aria-label="${esc(r.name)} est une structure cible"></td>`;
       const ld=tr.querySelector('[data-load]'), tg=tr.querySelector('[data-target]');
-      tg.onchange=()=>{ if(tg.checked){ ld.checked=true; ld.disabled=true; } else ld.disabled=false; };
+      tg.onchange=()=>{ if(tg.checked){ ld.checked=true; ld.disabled=true; } else ld.disabled=false; syncAll(); };
+      ld.onchange=syncAll;
       tr.dataset.k=k; sb.appendChild(tr); });
+    syncAll();
   };
+  // case « tout cocher » : cochée si tout est chargé, intermédiaire si une partie seulement ; les cibles restent chargées
+  const all=m.$('#u-all');
+  const syncAll=()=>{ const tot=[...sb.querySelectorAll('[data-load]')];
+    const on=tot.filter(x=>x.checked).length; all.checked=on===tot.length&&tot.length>0; all.indeterminate=on>0&&on<tot.length; };
+  all.onchange=()=>{ sb.querySelectorAll('[data-load]:not([disabled])').forEach(x=>{ x.checked=all.checked; }); syncAll(); };
   const info=(id,txt,ok)=>{ const d=m.$(id); d.querySelector('.info').textContent=txt; d.classList.toggle('ok',ok); };
   const setImgs=files=>{ F.images=[...files].filter(f=>!/^\./.test(f.name)&&!/\.(pdf|txt|xml|json|jpg|png)$/i.test(f.name));
     info('#d-img',F.images.length?`${F.images.length} fichier(s) · ${(F.images.reduce((a,f)=>a+f.size,0)/1048576).toFixed(1)} Mo`:'Aucun fichier sélectionné',F.images.length>0); };

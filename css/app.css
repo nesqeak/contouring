@@ -160,3 +160,5 @@ ul.list li:not(.here) .nm{color:var(--muted)}
 .ctip{position:absolute;pointer-events:none;background:var(--tipbg);box-shadow:var(--shadow);border:1px solid var(--line);border-radius:4px;padding:6px 9px;font-size:.8rem;z-index:3;min-width:160px}
 .ctip div{display:flex;justify-content:space-between;gap:12px}
 .ctip b{font-family:var(--f-data);font-weight:500}
+.stab tr.all td{background:var(--panel2);font-size:.8rem;color:var(--muted);border-bottom:1px solid var(--line)}
+.stab tr.all label{cursor:pointer}
