@@ -5,6 +5,7 @@ const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const SERIES={dark:['#3987e5','#d95926','#199e70','#c98500','#d55181','#008300','#9085e9'],light:['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#6250d6']};
 const THEME={
   dark:{surface:'#151b20',grid:'#25303a',axis:'#3a4652',text:'#8a99a5',ref:'#e66767',series:SERIES.dark},
+  page:{surface:'#f2f9fd',grid:'#dbe9f2',axis:'#b9cfdd',text:'#56697f',ref:'#e34948',series:SERIES.light}, // historique sur fond blanc
   light:{surface:'#ffffff',grid:'#e6e6e3',axis:'#c3c2b7',text:'#52514e',ref:'#e34948',series:SERIES.light},
 };
 const pct=d=>d==null?'—':(d*100).toFixed(1).replace('.',',')+' %';
@@ -40,14 +41,14 @@ function drawChart(cv,results,names,theme,W,H,hover){
 }
 
 function render(root,d,results){
-  const names=namesOf(results);
+  const names=namesOf(results), th=document.body.classList.contains('light')?'page':'dark', ser=THEME[th].series;
   root.innerHTML=`<div class="hist">
     <header class="vtop"><a class="btn" href="#/">← Menu</a>
       <div class="vtitle"><h1>Historique des scores Dice</h1><span class="meta">${esc(d.category)}${d.category?' · ':''}${esc(d.title)}</span></div>
       <span class="grow"></span>${results.length?'<button class="btn primary" id="h-pdf">Exporter en PDF</button>':''}</header>
     ${results.length?`
     <section class="card"><h2>Progression du Dice</h2>
-      ${results.length>1?`<div class="legend">${names.map((n,k)=>`<span><i style="--c:${SERIES.dark[k%7]}"></i>${esc(n)}</span>`).join('')}<span><i class="ref"></i>Seuil 80 %</span></div>
+      ${results.length>1?`<div class="legend">${names.map((n,k)=>`<span><i style="--c:${ser[k%7]}"></i>${esc(n)}</span>`).join('')}<span><i class="ref"></i>Seuil 80 %</span></div>
       <div class="chart"><canvas id="h-cv" aria-label="Courbes de progression du Dice par structure"></canvas><div class="ctip" hidden></div></div>`
       :'<div class="hint">La courbe de progression apparaîtra après la deuxième validation de ce dossier.</div>'}
     </section>
@@ -61,13 +62,13 @@ function render(root,d,results){
   if(cv){
     const tip=root.querySelector('.ctip'); let geo=null, hover=null;
     const paint=()=>{ const W=cv.parentNode.clientWidth, H=Math.max(240,Math.min(380,W*.45)), dpr=window.devicePixelRatio||1;
-      cv._dpr=dpr; cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px'; geo=drawChart(cv,results,names,'dark',W,H,hover); };
+      cv._dpr=dpr; cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px'; geo=drawChart(cv,results,names,th,W,H,hover); };
     paint(); const ro=new ResizeObserver(paint); ro.observe(cv.parentNode);
     cv.addEventListener('pointermove',e=>{ const r=cv.getBoundingClientRect(), x=e.clientX-r.left;
       const i=geo.n===1?0:Math.max(0,Math.min(geo.n-1,Math.round((x-geo.L)/geo.pw*(geo.n-1))));
       if(i!==hover){hover=i; paint();}
       const res=results[i];
-      tip.innerHTML=`<div><b>n° ${i+1}</b><span>${fdt(res.date)}</span></div>`+names.map((n,k)=>`<div><span><span class="sw" style="--c:${SERIES.dark[k%7]}"></span> ${esc(n)}</span><b>${pct(val(res,n))}</b></div>`).join('');
+      tip.innerHTML=`<div><b>n° ${i+1}</b><span>${fdt(res.date)}</span></div>`+names.map((n,k)=>`<div><span><span class="sw" style="--c:${ser[k%7]}"></span> ${esc(n)}</span><b>${pct(val(res,n))}</b></div>`).join('');
       tip.hidden=false; const tx=geo.X(i)+12, w=tip.offsetWidth; tip.style.left=(tx+w>r.width?geo.X(i)-w-12:tx)+'px'; tip.style.top='8px'; });
     cv.addEventListener('pointerleave',()=>{hover=null; tip.hidden=true; paint();});
   }

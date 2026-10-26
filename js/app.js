@@ -20,7 +20,7 @@ const sharedP=Shared.init().catch(()=>null).then(s=>{ shared=s;
 async function loadCatalogue(){
   try{ const r=await fetch('dossiers/catalogue.json',{cache:'no-cache'}); if(!r.ok) return [];
     const j=await r.json();
-    return (j.dossiers||[]).map(d=>({id:'cat-'+d.id,source:'catalogue',title:d.titre,category:d.categorie,targets:d.cibles||[],
+    return (j.dossiers||[]).map(d=>({id:'cat-'+d.id,source:'catalogue',title:d.titre,category:d.categorie,targets:d.cibles||[],structures:d.structures,
       pwHash:d.mot_de_passe_sha256,pdf:d.pdf,rtss:d.rtstruct,images:d.images||[]})); }
   catch(e){ return []; }
 }
@@ -153,36 +153,41 @@ function uploadForm(){
       <label class="btn" for="u-rt">Choisir le fichier…</label><input type="file" id="u-rt" hidden></div><div class="info">Aucun fichier sélectionné</div></div></div>
     <div class="field"><span class="lab">Histoire clinique (PDF)</span><div class="drop" id="d-pdf"><div class="pick">
       <label class="btn" for="u-pdf">Choisir le fichier…</label><input type="file" id="u-pdf" accept="application/pdf,.pdf" hidden></div><div class="info">Aucun fichier sélectionné</div></div></div>
-    <div class="field"><span class="lab">Structures à contourer</span>
-      <div class="hint">Le nom des structures à contourer doit correspondre au nom des structures cibles chargées dans le fichier structure.</div>
-      <div class="targets" id="u-targets"></div>
-      <div><button class="btn" id="u-addt">+ Ajouter une structure</button></div>
-      <div class="info hint" id="u-names"></div></div>
+    <div class="field"><span class="lab">Structures du fichier structure</span>
+      <div class="hint" id="u-shint">Chargez le fichier structure pour choisir les structures du dossier.</div>
+      <div class="tscroll" id="u-swrap" hidden><table class="stab"><thead><tr><th>Structure</th><th>Structure à charger</th><th>Structure cible</th></tr></thead><tbody id="u-structs"></tbody></table></div></div>
     <div class="field"><label for="u-pw">Mot de passe d'ouverture du dossier</label><input type="password" id="u-pw" autocomplete="new-password"></div>
     <div class="errors" id="u-err" hidden></div>
     <div class="actions"><button class="btn" id="u-cancel">Annuler</button><button class="btn primary" id="u-ok">Valider le chargement</button></div>`,{wide:true});
   const F={images:[],rtss:null,pdf:null};
-  const tl=m.$('#u-targets');
-  const addT=(v='')=>{ const d=document.createElement('div'); d.className='t';
-    d.innerHTML='<input type="text" placeholder="Nom de la structure (ex. CTV_T)" aria-label="Structure à contourer"><button class="btn" title="Retirer" aria-label="Retirer">×</button>';
-    d.querySelector('input').value=v; d.querySelector('button').onclick=()=>{ if(tl.children.length>1) d.remove(); else d.querySelector('input').value=''; };
-    tl.appendChild(d); return d.querySelector('input'); };
-  addT(); m.$('#u-addt').onclick=()=>addT().focus();
+  const sb=m.$('#u-structs');
+  // une ligne par structure du RTSTRUCT : « à charger » et « cible » (une cible est forcément chargée)
+  const showStructs=rois=>{
+    sb.innerHTML=''; m.$('#u-swrap').hidden=!rois; if(!rois) return;
+    m.$('#u-shint').textContent=rois.length?'Seules les structures cochées « à charger » sont ajoutées au dossier. Les structures cibles sont créées vides, à contourer par l\'utilisateur ; leur contour du fichier sert de référence pour le calcul du Dice.':'Le fichier structure ne contient aucune structure.';
+    rois.forEach((r,k)=>{ const tr=document.createElement('tr'), empty=!r.contours.length;
+      tr.innerHTML=`<td><span class="sw" style="--c:${r.color?'rgb('+r.color.join(',')+')':'var(--muted)'}"></span> ${esc(r.name)}${empty?' <span class="hint">(sans contour)</span>':''}</td>
+        <td><input type="checkbox" data-load ${empty?'':'checked'} aria-label="Charger ${esc(r.name)}"></td>
+        <td><input type="checkbox" data-target ${empty?'disabled':''} aria-label="${esc(r.name)} est une structure cible"></td>`;
+      const ld=tr.querySelector('[data-load]'), tg=tr.querySelector('[data-target]');
+      tg.onchange=()=>{ if(tg.checked){ ld.checked=true; ld.disabled=true; } else ld.disabled=false; };
+      tr.dataset.k=k; sb.appendChild(tr); });
+  };
   const info=(id,txt,ok)=>{ const d=m.$(id); d.querySelector('.info').textContent=txt; d.classList.toggle('ok',ok); };
   const setImgs=files=>{ F.images=[...files].filter(f=>!/^\./.test(f.name)&&!/\.(pdf|txt|xml|json|jpg|png)$/i.test(f.name));
     info('#d-img',F.images.length?`${F.images.length} fichier(s) · ${(F.images.reduce((a,f)=>a+f.size,0)/1048576).toFixed(1)} Mo`:'Aucun fichier sélectionné',F.images.length>0); };
   m.$('#u-img').onchange=e=>setImgs(e.target.files); m.$('#u-dir').onchange=e=>setImgs(e.target.files);
-  m.$('#u-rt').onchange=async e=>{ F.rtss=e.target.files[0]||null; info('#d-rt',F.rtss?F.rtss.name:'Aucun fichier sélectionné',!!F.rtss); F.roiNames=null; m.$('#u-names').textContent='';
+  m.$('#u-rt').onchange=async e=>{ F.rtss=e.target.files[0]||null; info('#d-rt',F.rtss?F.rtss.name:'Aucun fichier sélectionné',!!F.rtss); F.rs=null; showStructs(null);
+    m.$('#u-shint').textContent='Chargez le fichier structure pour choisir les structures du dossier.';
     if(!F.rtss) return;
-    try{ const rs=DICOM.parseRTSS(await F.rtss.arrayBuffer()); F.roiNames=rs.rois.map(r=>r.name);
-      m.$('#u-names').textContent='Structures du fichier : '+F.roiNames.join(', '); }
-    catch(err){ m.$('#u-names').textContent='Fichier structure illisible : '+err.message; } };
+    try{ F.rs=DICOM.parseRTSS(await F.rtss.arrayBuffer()); showStructs(F.rs.rois); }
+    catch(err){ m.$('#u-shint').textContent='Fichier structure illisible : '+err.message; } };
   m.$('#u-pdf').onchange=e=>{ F.pdf=e.target.files[0]||null; info('#d-pdf',F.pdf?F.pdf.name:'Aucun fichier sélectionné',!!F.pdf); };
   m.$('#u-cancel').onclick=m.close;
   const showErr=errs=>{ const b=m.$('#u-err'); b.innerHTML='<b>Le dossier ne peut pas être chargé :</b><ul>'+errs.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>'; b.hidden=false; b.scrollIntoView({block:'nearest'}); };
   m.$('#u-ok').onclick=async()=>{
     const title=m.$('#u-title').value.trim(), category=m.$('#u-cat').value, pw=m.$('#u-pw').value;
-    let targets=[...tl.querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean);
+    const rows=[...sb.children], sel=rows.filter(tr=>tr.querySelector('[data-load]').checked), tgt=rows.filter(tr=>tr.querySelector('[data-target]').checked);
     const errs=[];
     if(!title) errs.push('Le nom du dossier est manquant.');
     if(!category) errs.push('Le type tumoral n\'est pas choisi.');
@@ -191,29 +196,23 @@ function uploadForm(){
     if(!F.pdf) errs.push('Le fichier PDF de l\'histoire clinique n\'est pas chargé.');
     else if(shared&&F.pdf.size>20*1048576) errs.push('Le PDF de l\'histoire clinique dépasse 20 Mo.');
     else if(!/\.pdf$/i.test(F.pdf.name)&&F.pdf.type!=='application/pdf') errs.push('L\'histoire clinique doit être un fichier PDF.');
-    if(!targets.length) errs.push('Aucune structure à contourer n\'est renseignée.');
-    const dup=targets.filter((t,i)=>targets.findIndex(x=>DICOM.normName(x)===DICOM.normName(t))!==i);
-    if(dup.length) errs.push('Structure à contourer en double : '+[...new Set(dup)].join(', ')+'.');
+    if(F.rtss&&!F.rs) errs.push('Le fichier structure est illisible.');
+    else if(F.rs&&!tgt.length) errs.push('Aucune structure n\'est cochée comme structure cible.');
+    const names=tgt.map(tr=>F.rs.rois[tr.dataset.k].name), dup=names.filter((t,i)=>names.findIndex(x=>DICOM.normName(x)===DICOM.normName(t))!==i);
+    if(dup.length) errs.push('Plusieurs structures cibles portent le même nom : '+[...new Set(dup)].join(', ')+'.');
     if(!pw) errs.push('Le mot de passe d\'ouverture du dossier est manquant.');
     if(errs.length) return showErr(errs);
     // contrôle du contenu : images lisibles, RTSTRUCT lisible, cibles présentes et sur les images
     const ok=m.$('#u-ok'); ok.disabled=true; ok.textContent='Vérification des fichiers…'; m.$('#u-err').hidden=true;
     try{
-      let rs, V;
-      try{ rs=DICOM.parseRTSS(await F.rtss.arrayBuffer()); }catch(e){ errs.push('Fichier structure illisible : '+e.message); }
+      let V; const rois=sel.map(tr=>F.rs.rois[tr.dataset.k]), targets=tgt.map(tr=>F.rs.rois[tr.dataset.k]);
       try{ V=DICOM.buildVolume(await Promise.all(F.images.map(f=>f.arrayBuffer()))); }catch(e){ errs.push('Images DICOM illisibles : '+e.message); }
-      if(rs){
-        const miss=targets.filter(t=>!rs.rois.some(r=>DICOM.normName(r.name)===DICOM.normName(t)));
-        if(miss.length) errs.push(`Structure(s) absente(s) du fichier structure : ${miss.join(', ')}. Structures disponibles : ${rs.rois.map(r=>r.name).join(', ')||'aucune'}.`);
-        else if(V) for(const t of targets){ const r=rs.rois.find(r=>DICOM.normName(r.name)===DICOM.normName(t));
-          if(DICOM.rasterize(r,V).b[1]<0) errs.push(`La structure « ${r.name} » ne recoupe pas les images chargées (contour vide ou série différente).`); }
-      }
+      if(V) for(const r of targets) if(DICOM.rasterize(r,V).b[1]<0) errs.push(`La structure cible « ${r.name} » ne recoupe pas les images chargées (contour vide ou série différente).`);
       if(errs.length) return showErr(errs);
-      targets=targets.map(t=>rs.rois.find(r=>DICOM.normName(r.name)===DICOM.normName(t)).name); // nom exact du fichier structure
-      const d={id:'loc-'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),title,category,targets,pwHash:await Store.sha256(pw),created:new Date().toISOString(),
+      const d={id:'loc-'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),title,category,targets:targets.map(r=>r.name),structures:rois.map(r=>r.name),pwHash:await Store.sha256(pw),created:new Date().toISOString(),
         dims:[V.NX,V.NY,V.NZ]};
       if(shared){ ok.textContent='Envoi… 0 %';
-        await shared.add(d,V,rs.rois,F.pdf,p=>ok.textContent='Envoi… '+Math.round(p*100)+' %');
+        await shared.add(d,V,rois,F.pdf,p=>ok.textContent='Envoi… '+Math.round(p*100)+' %');
         m.close(); renderHome(); return; }
       ok.textContent='Enregistrement…';
       await Store.addDossier(d,{images:F.images.map(f=>new Blob([f],{type:'application/dicom'})),rtss:new Blob([F.rtss],{type:'application/dicom'}),pdf:new Blob([F.pdf],{type:'application/pdf'})});
@@ -240,7 +239,9 @@ async function renderViewer(id){
     const draft=await Store.getDraft(d.id).catch(()=>null);
     if(path!=='contourage/'+encodeURIComponent(id)) return; // l'utilisateur est parti entre-temps
     page.innerHTML='';
-    current=Viewer.open(page,{dossier:d,V,rois,draft,pdfUrl:await pdfUrl(d).catch(()=>null),
+    // seules les structures choisies au chargement (toutes pour un dossier sans liste) ; les cibles en font partie
+    const keep=d.structures&&new Set([...d.structures,...d.targets].map(DICOM.normName));
+    current=Viewer.open(page,{dossier:d,V,rois:keep?rois.filter(r=>keep.has(DICOM.normName(r.name))):rois,draft,pdfUrl:await pdfUrl(d).catch(()=>null),
       saveDraft:v=>Store.putDraft(d.id,v),
       confirm:confirmBox,
       onValidated:async scores=>{ await Store.addResult(d.id,{date:new Date().toISOString(),scores:scores.map(s=>({name:s.name,dice:s.dice,volUser:s.volUser,volRef:s.volRef}))});
@@ -253,7 +254,9 @@ async function route(){
   await sharedP;
   if(current){ current.destroy(); current=null; }
   modalRoot.innerHTML='';
-  const [r,arg]=path.split('/'), id=arg&&decodeURIComponent(arg);
+  const [r,arg]=path.split('/');
+  document.body.classList.toggle('light',r!=='contourage'); // accueil et historique sur fond blanc, visionneuse en console sombre
+  const id=arg&&decodeURIComponent(arg);
   window.scrollTo(0,0);
   if(r==='contourage'&&id) return renderViewer(id);
   if(r==='historique'&&id){ const d=await findDossier(id); const res=await Store.getResults(id).catch(()=>[]);

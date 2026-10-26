@@ -25,6 +25,7 @@ def main():
     p.add_argument('--rtstruct', required=True, type=pathlib.Path)
     p.add_argument('--pdf', required=True, type=pathlib.Path)
     p.add_argument('--cible', action='append', required=True, help='structure à contourer (répéter)')
+    p.add_argument('--charger', action='append', help='structure non cible à afficher (répéter ; par défaut toutes)')
     p.add_argument('--mot-de-passe', required=True)
     a = p.parse_args()
 
@@ -52,6 +53,7 @@ def main():
     cat['dossiers'].append({
         'id': a.id, 'titre': a.titre, 'categorie': a.categorie, 'cibles': a.cible,
         'mot_de_passe_sha256': hashlib.sha256(a.mot_de_passe.encode('utf-8')).hexdigest(),
+        **({'structures': a.cible + a.charger} if a.charger else {}),
         'pdf': f'dossiers/{a.id}/histoire.pdf', 'rtstruct': f'dossiers/{a.id}/rtstruct.dcm', 'images': noms,
     })
     cat_path.write_text(json.dumps(cat, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')

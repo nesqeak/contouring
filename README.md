@@ -23,9 +23,9 @@ Les dossiers sont classés par localisation tumorale (Crâne, ORL, Sein, Poumon,
 
 ### Ajouter un dossier
 
-Bouton **Ajouter un dossier** en bas du menu, mot de passe de chargement `sfro`. La fenêtre demande le nom du dossier, le type tumoral, les images DICOM (fichiers ou dossier), le fichier structure (RTSTRUCT), le PDF de l'histoire clinique, la liste des structures à contourer et le mot de passe d'ouverture du dossier.
+Bouton **Ajouter un dossier** en bas du menu, mot de passe de chargement `sfro`. La fenêtre demande le nom du dossier, le type tumoral, les images DICOM (fichiers ou dossier), le fichier structure (RTSTRUCT), le PDF de l'histoire clinique et le mot de passe d'ouverture du dossier. Une fois le RTSTRUCT choisi, ses structures s'affichent une par ligne avec deux cases : **Structure à charger** (cochée par défaut, sauf pour une structure sans contour) et **Structure cible**. Seules les structures à charger sont ajoutées au dossier. Une cible est toujours chargée : elle est créée vide, sous son nom du RTSTRUCT, pour être contourée, et son contour du fichier sert de référence au Dice.
 
-Le chargement est refusé, avec la liste des erreurs, si un élément manque, si les images ou le RTSTRUCT sont illisibles, si une structure à contourer n'existe pas dans le RTSTRUCT (la comparaison des noms ignore la casse) ou si son contour ne recoupe pas les images.
+Le chargement est refusé, avec la liste des erreurs, si un élément manque, si les images ou le RTSTRUCT sont illisibles, si aucune structure n'est cochée comme cible, si deux cibles portent le même nom ou si le contour d'une cible ne recoupe pas les images.
 
 Où le dossier est enregistré dépend de la façon dont la plateforme est servie :
 
@@ -35,8 +35,10 @@ Où le dossier est enregistré dépend de la façon dont la plateforme est servi
 ```bash
 python3 scripts/ajouter_dossier.py --id orl-01 --titre "Oropharynx T2N1" --categorie ORL \
     --images chemin/CT/ --rtstruct RS.dcm --pdf histoire.pdf \
-    --cible CTV_T --cible CTV_N --mot-de-passe secret
+    --cible CTV_T --cible CTV_N --charger Moelle --charger Parotide_G --mot-de-passe secret
 ```
+
+(`--charger`, facultatif et répétable, limite les structures non cibles affichées ; sans lui, toutes les structures du RTSTRUCT sont chargées.)
 
 Le script copie les fichiers dans `dossiers/orl-01/` et ajoute le dossier à `dossiers/catalogue.json` (le mot de passe y est stocké sous forme d'empreinte SHA-256). Il reste à committer et pousser. Tous les fichiers doivent être anonymisés avant d'être publiés.
 
@@ -44,7 +46,7 @@ Dans les deux cas, les contours en cours et l'historique des scores restent prop
 
 ### Contourage
 
-- Les structures du RTSTRUCT sont affichées en lecture seule, sauf les structures cibles : celles-ci sont créées vides et modifiables, et leur contour de référence reste masqué.
+- Les structures choisies au chargement sont affichées en lecture seule, sauf les structures cibles : celles-ci sont créées vides et modifiables, et leur contour de référence reste masqué.
 - Outils repris de la visionneuse d'origine : pinceau et gomme (rayon 1–25 mm), option pour ne pas peindre l'air ni l'os, copie de la coupe voisine, vider la coupe, effacer la structure, annulation (Ctrl+Z). Raccourcis : P pinceau, G gomme, `[` et `]` rayon, flèches haut/bas pour la coupe axiale.
 - Les contours en cours sont enregistrés dans le navigateur après chaque tracé et sont repris quand on rouvre le dossier.
 - **Validation des contours** (en bas de la visionneuse) : après confirmation, les contours sont figés, les contours de référence des cibles s'affichent en pointillés et l'index de Dice de chaque cible (2 |A ∩ B| / (|A| + |B|), calculé sur la grille du scanner) remplace les outils de contourage. Le résultat est enregistré avec sa date, et le dossier rouvert ensuite repart d'une session vierge.
