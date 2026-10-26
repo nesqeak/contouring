@@ -11,7 +11,9 @@ let path=location.hash.replace(/^#\/?/,'');
 function go(to){ path=to.replace(/^#\/?/,''); try{ history.replaceState(null,'','#/'+path); }catch(e){} route(); }
 document.addEventListener('click',e=>{ const a=e.target.closest&&e.target.closest('a[href^="#/"]'); if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey) return; e.preventDefault(); go(a.getAttribute('href')); });
 const pdfUrls={};
-// stockage partagé (plateforme publiée comme Artifact claude.ai) ; null en site statique
+// stockage partagé (plateforme publiée comme Artifact claude.ai) ; null en site statique.
+// ARTIFACT : page servie par artifact.html, où les dossiers doivent aller au stockage partagé, jamais au navigateur.
+const ARTIFACT=!!window.PLATEFORME_PARTAGEE;
 let shared=null;
 const sharedP=Shared.init().catch(()=>null).then(s=>{ shared=s;
   if(s) s.onChange(()=>{ if(!path&&!modalRoot.children.length) renderHome(); }); });
@@ -25,8 +27,8 @@ async function loadCatalogue(){
   catch(e){ return []; }
 }
 async function loadAll(){
-  if(shared){ const ok=await Store.listLocal().then(()=>true,()=>false);
-    return {list:await shared.list(),storeOk:ok}; }
+  if(shared){ const [sh,loc]=await Promise.all([shared.list(),Store.listLocal().catch(()=>null)]), ids=new Set(sh.map(d=>d.id));
+    return {list:[...sh,...(loc||[]).filter(d=>!ids.has(d.id)).map(d=>({...d,source:'local'}))],storeOk:loc!==null}; }
   const [cat,loc]=await Promise.all([loadCatalogue(),Store.listLocal().catch(()=>null)]);
   return {list:[...cat,...(loc||[]).map(d=>({...d,source:'local'}))], storeOk:loc!==null};
 }
@@ -101,9 +103,11 @@ async function renderHome(){
       <div class="logo"><img src="assets/logo-hcl.png" alt="Hospices Civils de Lyon" onerror="this.parentNode.hidden=true"></div>
       <div><h1>Plateforme d'entraînement au contourage</h1><div class="sub">Dossiers cliniques classés par localisation tumorale</div></div>
     </header>
+    ${ARTIFACT&&!shared?'<div class="errors"><b>Stockage partagé indisponible dans cette vue.</b> Ouvrez la plateforme depuis son lien claude.ai, en étant connecté à votre compte (pas dans un onglet séparé ni depuis un fichier enregistré). L\'ajout de dossiers est désactivé ici pour qu\'aucun dossier ne reste enfermé dans ce navigateur.</div>':''}
     ${storeOk?'':'<div class="errors">Ce navigateur bloque le stockage local : les dossiers chargés, les contours en cours et l\'historique des scores ne peuvent pas être enregistrés.</div>'}
     <div id="cats" style="display:grid;gap:18px"></div>
     <div class="add"><button class="btn primary" id="add">Ajouter un dossier</button></div>
+    <div class="hint" style="text-align:center;margin-top:-12px">${shared?'Stockage partagé : les dossiers ajoutés sont visibles par toutes les personnes ayant accès à la plateforme.':ARTIFACT?'':'Version locale : les dossiers ajoutés restent dans ce navigateur.'}</div>
     <footer class="disclaimer"><b>Avertissement :</b> cette plateforme est destinée exclusivement à la formation. Elle ne doit pas être utilisée pour la planification clinique des traitements.</footer>
   </div>`;
   const cats=page.querySelector('#cats');
@@ -114,8 +118,9 @@ async function renderHome(){
     sec.innerHTML=`<h2>${esc(c)} <span class="n">${ds.length||''}</span></h2>`+(ds.length?'':'<div class="none">Aucun dossier</div>');
     for(const d of ds){
       const row=document.createElement('div'); row.className='drow';
-      row.innerHTML=`<div class="t">${esc(d.title)}<small>${d.targets.length} structure${d.targets.length>1?'s':''} à contourer : ${esc(d.targets.join(', '))}</small></div>
-        <div class="acts"><a class="btn" data-pdf target="_blank" rel="noopener">Histoire clinique</a>
+      const onlyHere=shared&&d.source==='local';
+      row.innerHTML=`<div class="t">${esc(d.title)}${onlyHere?' <span class="tag">dans ce navigateur uniquement</span>':''}<small>${d.targets.length} structure${d.targets.length>1?'s':''} à contourer : ${esc(d.targets.join(', '))}</small></div>
+        <div class="acts">${onlyHere&&shared.canUpload?'<button class="btn" data-share title="Envoyer ce dossier vers le stockage partagé">Mettre en partage</button>':''}<a class="btn" data-pdf target="_blank" rel="noopener">Histoire clinique</a>
         <button class="btn primary" data-open>Contourage</button>
         <a class="btn" href="#/historique/${encodeURIComponent(d.id)}">Historique</a>
         ${d.source==='local'||(d.source==='shared'&&shared.canUpload)?'<button class="btn danger" data-del title="Supprimer ce dossier">Supprimer</button>':''}</div>`;
@@ -123,6 +128,8 @@ async function renderHome(){
       pdfUrl(d).then(u=>{ if(u) a.href=u; else a.hidden=true; }).catch(()=>{a.hidden=true;});
       row.querySelector('[data-open]').onclick=async()=>{
         if(await askPassword('Ouvrir « '+d.title+' »',checkDossierPw(d))){ unlocked.add(d.id); go('#/contourage/'+encodeURIComponent(d.id)); } };
+      const sh=row.querySelector('[data-share]');
+      if(sh) sh.onclick=()=>shareLocal(d,sh);
       const del=row.querySelector('[data-del]');
       if(del) del.onclick=async()=>{
         if(!await askPassword('Supprimer « '+d.title+' »',async pw=>pw===UPLOAD_PASSWORD,'Mot de passe de chargement requis. L\'historique des scores est conservé.')) return;
@@ -134,9 +141,26 @@ async function renderHome(){
     }
     cats.appendChild(sec);
   }
+  if(ARTIFACT&&!shared) page.querySelector('#add').disabled=true;
   if(shared&&!shared.canUpload){ const b=page.querySelector('#add'); b.disabled=true; b.title='Ajout réservé aux éditeurs de la plateforme';
     b.insertAdjacentHTML('afterend','<div class="hint" style="margin-left:10px;align-self:center">Ajout réservé aux éditeurs de la plateforme.</div>'); }
   page.querySelector('#add').onclick=async()=>{ if(await askPassword('Ajouter un dossier',async pw=>pw===UPLOAD_PASSWORD,'Mot de passe de chargement requis.')) uploadForm(); };
+}
+
+// dossier enregistré dans ce navigateur -> stockage partagé (même identifiant : historique et contours en cours suivent)
+async function shareLocal(d,btn){
+  if(!await askPassword('Mettre en partage « '+d.title+' »',async pw=>pw===UPLOAD_PASSWORD,'Mot de passe de chargement requis.')) return;
+  btn.disabled=true; const t=btn.textContent;
+  try{
+    btn.textContent='Lecture…';
+    const f=await Store.getFiles(d.id); if(!f) throw new Error('fichiers du dossier introuvables dans ce navigateur');
+    const V=DICOM.buildVolume(await Promise.all(f.images.map(b=>b.arrayBuffer()))), rs=DICOM.parseRTSS(await f.rtss.arrayBuffer());
+    const keep=d.structures&&new Set([...d.structures,...d.targets].map(DICOM.normName));
+    const {source,...meta}=d; void source;
+    await shared.add(meta,V,keep?rs.rois.filter(r=>keep.has(DICOM.normName(r.name))):rs.rois,f.pdf,p=>btn.textContent='Envoi… '+Math.round(p*100)+' %');
+    await Store.removeDossierFiles(d.id);
+    renderHome();
+  }catch(e){ btn.disabled=false; btn.textContent=t; await message('Mise en partage impossible',e.message); }
 }
 
 // ---- chargement d'un dossier ----

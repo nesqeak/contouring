@@ -36,6 +36,7 @@ window.Store={
   getDossier:id=>get('dossiers',id),
   async addDossier(d,files){ await put('files',d.id,files); try{ await put('dossiers',d.id,d); }catch(e){ await del('files',d.id).catch(()=>{}); throw e; } },
   async removeDossier(id){ await del('dossiers',id); await del('files',id); await del('drafts',id); },
+  async removeDossierFiles(id){ await del('dossiers',id); await del('files',id); }, // garde contours en cours et résultats
   getFiles:id=>get('files',id),
   getDraft:id=>get('drafts',id),
   putDraft:(id,v)=>put('drafts',id,v),
