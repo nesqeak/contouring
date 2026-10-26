@@ -28,7 +28,7 @@ function open(root,ctx){
   <div class="vtitle"><h1>${esc(dossier.title)}</h1>
   <span class="meta">${esc(dossier.category)} · ${NX} × ${NY} × ${NZ} voxels · ${DX.toFixed(2)} × ${DY.toFixed(2)} × ${DZ.toFixed(2)} mm</span></div>
   <span class="grow"></span>
-  <a class="btn" id="v-pdf" href="#" target="_blank" rel="noopener">Histoire clinique (PDF)</a>
+  <button class="btn" id="v-pdf">Histoire clinique (PDF)</button>
   <a class="btn" href="#/historique/${encodeURIComponent(dossier.id)}">Historique</a>
 </header>
 <div class="app">
@@ -81,7 +81,7 @@ function open(root,ctx){
 </div>
 <div class="tip" id="tip" hidden></div>`;
   const $=id=>root.querySelector('#'+id);
-  if(ctx.pdfUrl) $('v-pdf').href=ctx.pdfUrl; else $('v-pdf').hidden=true;
+  if(ctx.openPdf) $('v-pdf').onclick=()=>ctx.openPdf($('v-pdf')); else $('v-pdf').hidden=true;
 
   // ---- structures ----
   const emptyBox=()=>[NX,-1,NY,-1,NZ,-1];

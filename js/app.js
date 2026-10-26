@@ -10,7 +10,6 @@ let current=null; // visionneuse ouverte
 let path=location.hash.replace(/^#\/?/,'');
 function go(to){ path=to.replace(/^#\/?/,''); try{ history.replaceState(null,'','#/'+path); }catch(e){} route(); }
 document.addEventListener('click',e=>{ const a=e.target.closest&&e.target.closest('a[href^="#/"]'); if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey) return; e.preventDefault(); go(a.getAttribute('href')); });
-const pdfUrls={};
 // stockage partagé (plateforme publiée comme Artifact claude.ai) ; null en site statique.
 // ARTIFACT : page servie par artifact.html, où les dossiers doivent aller au stockage partagé, jamais au navigateur.
 const ARTIFACT=!!window.PLATEFORME_PARTAGEE;
@@ -33,12 +32,20 @@ async function loadAll(){
   return {list:[...cat,...(loc||[]).map(d=>({...d,source:'local'}))], storeOk:loc!==null};
 }
 async function findDossier(id){ return (await loadAll()).list.find(d=>d.id===id); }
-async function pdfUrl(d){
-  if(d.source==='catalogue') return d.pdf;
-  if(d.source==='shared') return shared.pdfUrl(d);
-  if(pdfUrls[d.id]) return pdfUrls[d.id];
-  const f=await Store.getFiles(d.id); return f&&f.pdf?(pdfUrls[d.id]=URL.createObjectURL(f.pdf)):null;
+// Histoire clinique : dans un Artifact, un lien ouvrant un nouvel onglet ne peut pas lire le stockage de la
+// plateforme ; le PDF est donc lu par la page puis proposé au téléchargement (capacité « downloads »).
+async function openPdf(d,btn){
+  const t=btn&&btn.textContent; if(btn){ btn.disabled=true; btn.textContent='Préparation…'; }
+  try{
+    const blob=d.source==='shared'?await shared.pdfBlob(d):d.source==='local'?(await Store.getFiles(d.id)).pdf:await (await fetch(d.pdf)).blob();
+    const filename='Histoire clinique - '+d.title.replace(/[\\/:*?"<>|]+/g,' ').trim()+'.pdf';
+    const dl=window.claude&&typeof claude.use==='function'?await claude.use('downloads'):null;
+    if(dl){ try{ await dl.save({filename,data:blob}); }catch(e){ if(e&&e.code!=='declined') throw new Error(e.message||e.code); } }
+    else { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.target='_blank'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),60000); }
+  }catch(e){ await message('Histoire clinique indisponible',e.message||String(e)); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent=t; } }
 }
+
 // volume et structures du dossier
 async function loadCase(d,progress,msg){
   if(d.source==='shared') return shared.load(d,progress);
@@ -122,12 +129,13 @@ async function renderHome(){
       const row=document.createElement('div'); row.className='drow';
       const onlyHere=shared&&d.source==='local';
       row.innerHTML=`<div class="t">${esc(d.title)}${onlyHere?' <span class="tag">dans ce navigateur uniquement</span>':''}<small>${d.targets.length} structure${d.targets.length>1?'s':''} à contourer : ${esc(d.targets.join(', '))}</small></div>
-        <div class="acts">${onlyHere&&shared.canUpload?'<button class="btn" data-share title="Envoyer ce dossier vers le stockage partagé">Mettre en partage</button>':''}<a class="btn" data-pdf target="_blank" rel="noopener">Histoire clinique</a>
+        <div class="acts">${onlyHere&&shared.canUpload?'<button class="btn" data-share title="Envoyer ce dossier vers le stockage partagé">Mettre en partage</button>':''}<button class="btn" data-pdf>Histoire clinique</button>
         <button class="btn primary" data-open>Contourage</button>
         <a class="btn" href="#/historique/${encodeURIComponent(d.id)}">Historique</a>
         ${d.source==='local'||(d.source==='shared'&&shared.canUpload)?'<button class="btn danger" data-del title="Supprimer ce dossier">Supprimer</button>':''}</div>`;
       const a=row.querySelector('[data-pdf]');
-      pdfUrl(d).then(u=>{ if(u) a.href=u; else a.hidden=true; }).catch(()=>{a.hidden=true;});
+      if(d.source==='shared'?!d.pdf:d.source==='catalogue'?!d.pdf:false) a.hidden=true;
+      a.onclick=()=>openPdf(d,a);
       row.querySelector('[data-open]').onclick=async()=>{
         if(await askPassword('Ouvrir « '+d.title+' »',checkDossierPw(d))){ unlocked.add(d.id); go('#/contourage/'+encodeURIComponent(d.id)); } };
       const sh=row.querySelector('[data-share]');
@@ -308,7 +316,7 @@ async function renderViewer(id){
     page.innerHTML='';
     // seules les structures choisies au chargement (toutes pour un dossier sans liste) ; les cibles en font partie
     const keep=d.structures&&new Set([...d.structures,...d.targets].map(DICOM.normName));
-    current=Viewer.open(page,{dossier:d,V,fusions:fusions||[],rois:keep?rois.filter(r=>keep.has(DICOM.normName(r.name))):rois,draft,pdfUrl:await pdfUrl(d).catch(()=>null),
+    current=Viewer.open(page,{dossier:d,V,fusions:fusions||[],rois:keep?rois.filter(r=>keep.has(DICOM.normName(r.name))):rois,draft,openPdf:btn=>openPdf(d,btn),
       saveDraft:v=>Store.putDraft(d.id,v),
       confirm:confirmBox,
       onValidated:async scores=>{ await Store.addResult(d.id,{date:new Date().toISOString(),scores:scores.map(s=>({name:s.name,dice:s.dice,volUser:s.volUser,volRef:s.volRef}))});

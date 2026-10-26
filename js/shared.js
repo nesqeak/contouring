@@ -58,7 +58,12 @@ async function init(){
   const db=await claude.use('db'); if(!db) return null;
   const assets=await claude.use('assets').catch(()=>null);
   const col=db.collection('dossiers');
-  const fetchBuf=async id=>{ const r=await fetch('/_blob/'+id); if(!r.ok) throw new Error('fichier du dossier inaccessible ('+r.status+')'); return r.arrayBuffer(); };
+  // lecture d'un asset ; un nouvel essai en cas d'échec réseau passager
+  const fetchBuf=async(id,what='fichier')=>{ let last;
+    for(let k=0;k<2;k++){ try{ const r=await fetch('/_blob/'+id,{credentials:'include'}); if(r.ok) return await r.arrayBuffer(); last=new Error(what+' inaccessible (réponse '+r.status+')'); if(r.status<500) break; }
+      catch(e){ last=new Error(what+' inaccessible ('+(e.message||'erreur réseau')+')'); }
+      await new Promise(r=>setTimeout(r,800)); }
+    throw last; };
   const up=async(blob,type)=>(await assets.upload(blob,type?{type}:undefined)).id;
   const errMsg=e=>({quota_or_state:'espace de stockage de la plateforme plein',too_large:'fichier trop volumineux (20 Mio maximum)',rate_limited:'trop de requêtes, réessayer dans un instant',not_granted:'chargement réservé aux éditeurs de la plateforme'}[e&&e.code]||(e&&e.message)||'erreur inconnue');
   return {
@@ -67,6 +72,7 @@ async function init(){
     async list(){ const s=await col.get(); return s.docs.map(d=>({...d.data(),id:d.id,source:'shared'})); },
     onChange(fn){ return col.onSnapshot(()=>fn(),()=>{}); },
     pdfUrl:d=>d.pdf?'/_blob/'+d.pdf:null,
+    pdfBlob:async d=>new Blob([await fetchBuf(d.pdf,'histoire clinique')],{type:'application/pdf'}),
     // d : métadonnées ; V : volume construit ; rois : RTSTRUCT lu ; pdf : File
     // fusions : [{name, modality, data: Uint8Array sur la grille du scanner}]
     async add(d,V,rois,pdf,progress,fusions=[]){
@@ -83,12 +89,18 @@ async function init(){
     },
     async remove(d){ await col.doc(d.id).delete(); if(assets) for(const id of [...(d.vol||[]).map(c=>c.id),...(d.fusions||[]).flatMap(f=>f.vol.map(c=>c.id)),d.structs,d.pdf]) if(id) await assets.delete(id).catch(()=>{}); },
     async load(d,progress){
-      const [NX,NY,NZ]=d.dims, vol=new Int16Array(NX*NY*NZ); let n=0;
-      await Promise.all(d.vol.map(async c=>{ await decodePNG(await fetchBuf(c.id),vol,NX,NY,c.z0); progress(++n/(d.vol.length+1)); }));
-      const s=JSON.parse(new TextDecoder().decode(await fetchBuf(d.structs)));
+      const [NX,NY,NZ]=d.dims; let vol;
+      try{ vol=new Int16Array(NX*NY*NZ); }catch(e){ throw new Error('mémoire insuffisante pour ce scanner sur cet appareil'); }
+      // blocs lus un par un : limite la mémoire de pointe (un bloc décompressé fait jusqu'à 18 Mo)
+      for(const [k,c] of d.vol.entries()){
+        const buf=await fetchBuf(c.id,`bloc d'images ${k+1}/${d.vol.length}`);
+        try{ await decodePNG(buf,vol,NX,NY,c.z0); }catch(e){ throw new Error(`bloc d'images ${k+1}/${d.vol.length} illisible (${e.message})`); }
+        progress((k+1)/(d.vol.length+1)); }
+      let s; try{ s=JSON.parse(new TextDecoder().decode(await fetchBuf(d.structs,'fichier des structures'))); }
+      catch(e){ throw new Error(e instanceof SyntaxError?'fichier des structures illisible':e.message); }
       const V={NX,NY,NZ,spacing:d.spacing,vol,toIndex:P=>[P[0],P[1],P[2],0]};
       const fusions=(d.fusions||[]).map(f=>({name:f.name,modality:f.modality,load:async()=>{ const u=new Uint8Array(NX*NY*NZ);
-        await Promise.all(f.vol.map(async c=>decodePNG(await fetchBuf(c.id),u,NX,NY,c.z0))); return u; }}));
+        for(const c of f.vol) await decodePNG(await fetchBuf(c.id,'imagerie de fusion'),u,NX,NY,c.z0); return u; }}));
       return {V,rois:s.rois.map(r=>({...r,contours:r.contours.map(c=>Float64Array.from(c))})),fusions};
     },
   };
