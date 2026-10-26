@@ -73,7 +73,7 @@ function render(root,d,results){
   }
   const btn=root.querySelector('#h-pdf');
   if(btn) btn.onclick=async()=>{ btn.disabled=true; const t=btn.textContent; btn.textContent='Préparation…';
-    try{ await exportPdf(d,results,names); }catch(e){ alert('Export PDF impossible : '+e.message); }
+    try{ await exportPdf(d,results,names); }catch(e){ if(e&&e.code!=='declined') UI.message('Export PDF impossible',e.message||String(e)); }
     finally{ btn.disabled=false; btn.textContent=t; } };
 }
 
@@ -128,7 +128,10 @@ async function exportPdf(d,results,names){
   doc.setFontSize(7.5); doc.setTextColor(130);
   txt('Plateforme à but de formation : ne doit pas être utilisée pour la planification clinique.',PW/2,290,{align:'center'});
   const safe=s=>s.replace(/Œ/g,'OE').replace(/œ/g,'oe').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
-  doc.save(`Dice_${safe(d.category||'dossier')}_${safe(d.title)}.pdf`);
+  const filename=`Dice_${safe(d.category||'dossier')}_${safe(d.title)}.pdf`;
+  // dans un Artifact, le téléchargement passe par la capacité « downloads » (confirmation du lecteur)
+  const dl=window.claude&&typeof claude.use==='function'?await claude.use('downloads'):null;
+  if(dl) await dl.save({filename,data:doc.output('blob')}); else doc.save(filename);
 }
 window.DiceHistory={render};
 })();

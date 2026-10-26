@@ -27,7 +27,10 @@ Bouton **Ajouter un dossier** en bas du menu, mot de passe de chargement `sfro`.
 
 Le chargement est refusé, avec la liste des erreurs, si un élément manque, si les images ou le RTSTRUCT sont illisibles, si une structure à contourer n'existe pas dans le RTSTRUCT (la comparaison des noms ignore la casse) ou si son contour ne recoupe pas les images.
 
-**Important : un dossier ajouté par ce bouton est enregistré dans le navigateur qui l'a chargé (IndexedDB), et seulement là.** Le site étant statique, il n'a pas d'espace de stockage commun. Pour publier un dossier pour tous les utilisateurs, l'ajouter au dépôt avec le script :
+Où le dossier est enregistré dépend de la façon dont la plateforme est servie :
+
+- **Publiée comme Artifact claude.ai (stockage partagé)**, à partir de `artifact.html` : le dossier est visible par toutes les personnes avec qui l'Artifact est partagé. Ses métadonnées vont dans la base partagée de l'Artifact (collection `dossiers`, modifiable par les seuls éditeurs) et ses fichiers dans les assets de l'Artifact. Les assets n'acceptent pas le DICOM : au chargement, le scanner est converti en PNG 16 bits en niveaux de gris (HU + 1024, sans perte, jusqu'à 18 Mo de pixels par image) et le RTSTRUCT en JSON (contours en coordonnées voxel). Seuls les éditeurs de l'Artifact peuvent ajouter ou supprimer un dossier ; le PDF est limité à 20 Mo.
+- **Site statique (GitHub Pages, serveur local)**, à partir de `index.html` : le dossier est enregistré dans le navigateur qui l'a chargé (IndexedDB), et seulement là. Pour publier un dossier pour tous sur le site statique, l'ajouter au dépôt avec le script :
 
 ```bash
 python3 scripts/ajouter_dossier.py --id orl-01 --titre "Oropharynx T2N1" --categorie ORL \
@@ -36,6 +39,8 @@ python3 scripts/ajouter_dossier.py --id orl-01 --titre "Oropharynx T2N1" --categ
 ```
 
 Le script copie les fichiers dans `dossiers/orl-01/` et ajoute le dossier à `dossiers/catalogue.json` (le mot de passe y est stocké sous forme d'empreinte SHA-256). Il reste à committer et pousser. Tous les fichiers doivent être anonymisés avant d'être publiés.
+
+Dans les deux cas, les contours en cours et l'historique des scores restent propres à chaque utilisateur, dans son navigateur.
 
 ### Contourage
 
@@ -62,6 +67,8 @@ Pour chaque dossier : tableau des Dice par validation, courbes de progression av
 | `js/viewer.js` | visionneuse, outils de contourage, validation et Dice |
 | `js/history.js` | historique, courbes, export PDF |
 | `js/store.js` | stockage local (IndexedDB) |
+| `js/shared.js` | stockage partagé de l'Artifact : base `dossiers`, assets, codage PNG 16 bits du scanner |
+| `artifact.html` | point d'entrée de la version Artifact (mêmes scripts que `index.html`) |
 | `js/app.js` | menu, chargement des dossiers, mots de passe, navigation |
 | `dossiers/catalogue.json` | dossiers publiés pour tous |
 | `assets/logo-hcl.png` | logo des HCL affiché à côté du titre (à déposer) |
