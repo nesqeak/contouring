@@ -118,6 +118,11 @@ document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closes
   if(b.dataset.act==='profil') profileModal();
   else if(b.dataset.act==='logout'){ Accounts.logout(); go('#/'); } });
 
+// localisations repliées / dépliées, retenues dans ce navigateur (simple confort, sans conséquence si indisponible)
+const FKEY='plateforme-contourage:localisations';
+const fold=(()=>{ try{ return JSON.parse(localStorage.getItem(FKEY))||{}; }catch(e){ return {}; } })();
+const saveFold=()=>{ try{ localStorage.setItem(FKEY,JSON.stringify(fold)); }catch(e){} };
+
 // ---- menu principal ----
 async function renderHome(){
   page.innerHTML=siteHeader()+'<div class="loading">Chargement des dossiers…</div>';
@@ -129,7 +134,8 @@ async function renderHome(){
     </header>
     ${ARTIFACT&&!shared?'<div class="errors"><b>Stockage partagé indisponible dans cette vue.</b> Ouvrez la plateforme depuis son lien claude.ai, en étant connecté à votre compte (pas dans un onglet séparé ni depuis un fichier enregistré). L\'ajout de dossiers est désactivé ici pour qu\'aucun dossier ne reste enfermé dans ce navigateur.</div>':''}
     ${storeOk?'':'<div class="errors">Ce navigateur bloque le stockage local : les dossiers chargés, les contours en cours et l\'historique des scores ne peuvent pas être enregistrés.</div>'}
-    <div id="cats" style="display:grid;gap:18px"></div>
+    <div class="catbar"><button class="btn" data-fold="1">Tout déplier</button><button class="btn" data-fold="0">Tout replier</button></div>
+    <div id="cats" style="display:grid;gap:14px"></div>
     ${admin?`<div class="add"><button class="btn primary" id="add">Ajouter un dossier</button></div>
     <div class="hint" style="text-align:center;margin-top:-12px">${shared?'Stockage partagé : les dossiers ajoutés sont visibles par toutes les personnes ayant accès à la plateforme.':'Version locale : les dossiers et les comptes restent dans ce navigateur.'}</div>`:''}
     <footer class="disclaimer"><b>Avertissement :</b> cette plateforme est destinée exclusivement à la formation. Elle ne doit pas être utilisée pour la planification clinique des traitements.</footer>
@@ -138,8 +144,11 @@ async function renderHome(){
   const extra=[...new Set(list.map(d=>d.category).filter(c=>!CATEGORIES.includes(c)))];
   for(const c of [...CATEGORIES,...extra]){
     const ds=list.filter(d=>d.category===c).sort((a,b)=>a.title.localeCompare(b.title,'fr'));
-    const sec=document.createElement('section'); sec.className='cat'+(ds.length?'':' empty');
-    sec.innerHTML=`<h2>${esc(c)} <span class="n">${ds.length||''}</span></h2>`+(ds.length?'':'<div class="none">Aucun dossier</div>');
+    // localisation repliable ; l'état choisi est retenu dans ce navigateur (par défaut : dépliée si elle a des dossiers)
+    const sec=document.createElement('details'); sec.className='cat'+(ds.length?'':' empty'); sec.dataset.cat=c;
+    sec.open=c in fold?fold[c]:ds.length>0;
+    sec.innerHTML=`<summary><h2>${esc(c)} <span class="n">${ds.length?ds.length+' dossier'+(ds.length>1?'s':''):''}</span></h2></summary>`+(ds.length?'':'<div class="none">Aucun dossier</div>');
+    sec.addEventListener('toggle',()=>{ fold[c]=sec.open; saveFold(); });
     for(const d of ds){
       const row=document.createElement('div'); row.className='drow';
       const onlyHere=shared&&d.source==='local';
@@ -156,15 +165,22 @@ async function renderHome(){
       const sh=row.querySelector('[data-share]');
       if(sh) sh.onclick=()=>shareLocal(d,sh);
       const del=row.querySelector('[data-del]');
-      if(del) del.onclick=async()=>{
-        if(!await confirmBox('Supprimer définitivement le dossier « '+d.title+' »'+(d.source==='shared'?' pour tous les utilisateurs ?':' de ce navigateur ?'))) return;
-        try{ if(d.source==='shared') await shared.remove(d); else await Store.removeDossier(d.id); }
-        catch(e){ await message('Suppression impossible',(shared?shared.errMsg(e):e.message)); }
-        renderHome(); };
+      if(del) del.onclick=()=>{ // suppression protégée par le mot de passe administrateur
+        const m=modal(`<h2>Supprimer le dossier « ${esc(d.title)} »</h2>
+          <div class="errors"><b>Attention cette action est irréversible.</b> Le dossier ${d.source==='shared'?'est supprimé pour tous les utilisateurs':'est supprimé de ce navigateur'} (images, structures, histoire clinique) ; les scores déjà obtenus restent dans l'historique des internes.</div>
+          <div class="field"><label for="dd-pw">Votre mot de passe administrateur</label><input type="password" id="dd-pw" autocomplete="current-password"></div>
+          <div class="pw-err" aria-live="polite"></div>
+          <div class="actions"><button class="btn" data-x>Annuler</button><button class="btn danger" data-ok>Supprimer définitivement</button></div>`);
+        m.$('[data-x]').onclick=m.close; m.$('#dd-pw').focus();
+        m.$('[data-ok]').onclick=async()=>{ const err=m.$('.pw-err'); err.textContent='';
+          if(!await checkAdminPw(m.$('#dd-pw').value)){ err.textContent='Mot de passe incorrect.'; return; }
+          try{ if(d.source==='shared') await shared.remove(d); else await Store.removeDossier(d.id); m.close(); renderHome(); }
+          catch(e){ err.textContent='Suppression impossible : '+(shared?shared.errMsg(e):e.message); } }; };
       sec.appendChild(row);
     }
     cats.appendChild(sec);
   }
+  page.querySelectorAll('[data-fold]').forEach(b=>b.onclick=()=>{ cats.querySelectorAll('details.cat').forEach(x=>{ x.open=b.dataset.fold==='1'; }); });
   if(!admin) return;
   const adds=page.querySelectorAll('#add,[data-a="add"]');
   if(shared&&!shared.canUpload) adds.forEach(b=>{ b.disabled=true; b.title='Ajout réservé aux éditeurs de l\'Artifact (menu Partager de claude.ai)'; });
