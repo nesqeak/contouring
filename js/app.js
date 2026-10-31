@@ -361,7 +361,6 @@ async function renderLogin(){
   const first=!err&&!accounts.length;
   page.innerHTML=siteHeader()+`<div class="login">
     <h1>Plateforme d'entraînement au contourage</h1>
-    <p class="sub">Entraînement au contourage des volumes cibles sur des dossiers cliniques anonymisés, avec calcul du Dice par rapport au contour de référence.</p>
     ${err?`<div class="errors">Les comptes ne peuvent pas être lus : ${esc(err.message||String(err))}</div>`:first?`
     <form class="card lform" id="boot"><h2>Premier démarrage</h2>
       <div class="hint">Aucun compte n'existe encore. Créez le compte administrateur principal.</div>
