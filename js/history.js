@@ -83,17 +83,10 @@ let jspdfP=null;
 const loadJsPDF=()=>jspdfP||(jspdfP=new Promise((res,rej)=>{ if(window.jspdf) return res(window.jspdf);
   const s=document.createElement('script'); s.src='lib/jspdf.umd.min.js'; s.onload=()=>res(window.jspdf); s.onerror=()=>{jspdfP=null; rej(new Error('bibliothèque PDF introuvable'));}; document.head.appendChild(s); }));
 
-async function exportPdf(d,results,names,who){
-  const {jsPDF}=await loadJsPDF();
-  const doc=new jsPDF({unit:'mm',format:'a4'}), PW=210, M=15, CW=PW-2*M; let y=M;
+// Tableau des validations et courbe de progression d'un dossier dans un PDF ; renvoie l'ordonnée suivante
+const PW=210, M=15, CW=PW-2*M;
+function dossierSection(doc,y,results,names){
   const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o);
-  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
-  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
-  y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt(d.category||'—',M,y);
-  y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); doc.splitTextToSize(d.title,CW).forEach(l=>{txt(l,M,y); y+=6;});
-  if(who){ doc.setFontSize(10); doc.setTextColor(90); txt('Interne : '+who,M,y); y+=5; doc.setTextColor(20); }
-  y+=2; doc.setDrawColor(200); doc.line(M,y,PW-M,y); y+=8;
-
   // tableau
   doc.setFont('helvetica','bold'); doc.setFontSize(11); txt('Résultats Dice',M,y); y+=6;
   const cols=['Validation',...names,...(names.length>1?['Moyenne']:[])], first=42, cw=(CW-first)/Math.max(1,cols.length-1);
@@ -115,7 +108,7 @@ async function exportPdf(d,results,names,who){
 
   // courbes
   if(results.length>1){
-    const ch=95; if(y+ch+20>287){ doc.addPage(); y=M; }
+    const ch=95; if(y+ch+20>282){ doc.addPage(); y=M; }
     doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(20); txt('Progression du Dice',M,y); y+=4;
     const W=900, H=Math.round(W*ch/CW), cv=document.createElement('canvas'); cv._dpr=2; cv.width=W*2; cv.height=H*2;
     drawChart(cv,results,names,'light',W,H,null);
@@ -128,6 +121,20 @@ async function exportPdf(d,results,names,who){
       doc.setTextColor(40); txt(l.n,x+8,y); x+=w; }
     y+=8;
   }
+  return y;
+}
+async function exportPdf(d,results,names,who){
+  const {jsPDF}=await loadJsPDF();
+  const doc=new jsPDF({unit:'mm',format:'a4'}); let y=M;
+  const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
+  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
+  y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt(d.category||'—',M,y);
+  y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); doc.splitTextToSize(d.title,CW).forEach(l=>{txt(l,M,y); y+=6;});
+  if(who){ doc.setFontSize(10); doc.setTextColor(90); txt('Interne : '+who,M,y); y+=5; doc.setTextColor(20); }
+  y+=2; doc.setDrawColor(200); doc.line(M,y,PW-M,y); y+=8;
+
+  y=dossierSection(doc,y,results,names);
   doc.setFontSize(7.5); doc.setTextColor(130);
   txt('Plateforme à but de formation : ne doit pas être utilisée pour la planification clinique.',PW/2,290,{align:'center'});
   const safe=s=>s.replace(/Œ/g,'OE').replace(/œ/g,'oe').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
@@ -139,7 +146,7 @@ async function exportPdf(d,results,names,who){
 // Export PDF des statistiques d'un dossier (page administrateur) : rows = [{name,n,mean,med,sd,min,max}]
 async function exportStatsPdf(d,rows,info){
   const {jsPDF}=await loadJsPDF();
-  const doc=new jsPDF({unit:'mm',format:'a4'}), PW=210, M=15, CW=PW-2*M; let y=M;
+  const doc=new jsPDF({unit:'mm',format:'a4'}); let y=M;
   const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o), dash=v=>v==null||isNaN(v)?'-':pct(v);
   doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
   txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
@@ -169,5 +176,51 @@ async function exportStatsPdf(d,rows,info){
   const dl=window.claude&&typeof claude.use==='function'?await claude.use('downloads'):null;
   if(dl) await dl.save({filename,data:doc.output('blob')}); else doc.save(filename);
 }
-window.DiceHistory={render,exportStatsPdf};
+
+// Export PDF du suivi d'un interne : profil, semestres, puis fiches d'historique par localisation et par dossier.
+// a : compte ; sem : 10 semestres ; groups : [{category, dossiers:[{d, results}]}]
+async function exportInternPdf(a,sem,groups){
+  const {jsPDF}=await loadJsPDF();
+  const doc=new jsPDF({unit:'mm',format:'a4'}); let y=M;
+  const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o), need=h=>{ if(y+h>282){ doc.addPage(); y=M; } };
+  const name=`${(a.nom||'').toUpperCase()} ${a.prenom||''}`.trim();
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
+  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
+  y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt('Suivi de l\'interne',M,y);
+  y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); txt(name,M,y); y+=4;
+  doc.setDrawColor(200); doc.line(M,y,PW-M,y); y+=8;
+  // profil
+  doc.setFont('helvetica','bold'); doc.setFontSize(11); txt('Profil',M,y); y+=6; doc.setFontSize(9.5);
+  for(const [k,v] of [['Adresse e-mail',a.email],['Subdivision',a.profile?.subdivision||'profil non complété'],['Début d\'internat',a.profile?.annee||'-'],
+      ['Compte créé le',new Date(a.created).toLocaleDateString('fr-FR')],['Activation',a.pw?'compte activé':'en attente']]){
+    doc.setFont('helvetica','normal'); doc.setTextColor(100); txt(k,M,y); doc.setTextColor(20); txt(String(v),M+42,y); y+=5; }
+  // semestres
+  y+=4; doc.setFont('helvetica','bold'); doc.setFontSize(11); txt('Semestres',M,y); y+=6;
+  const sx=[M,M+30,M+80,M+130], sw=[28,48,48,50];
+  doc.setFontSize(8.5); doc.setTextColor(80); ['','Période','Spécialité','Terrain de stage'].forEach((c,i)=>txt(c,sx[i],y)); y+=2; doc.setDrawColor(180); doc.line(M,y,PW-M,y); y+=4.5;
+  doc.setFont('helvetica','normal');
+  for(let i=0;i<10;i++){ const s=sem[i]||{}, cells=[i?`${i+1}ème semestre`:'1er semestre',s.periode||'',s.specialite||'',s.terrain||''].map((c,k)=>doc.splitTextToSize(c,sw[k]));
+    const h=Math.max(...cells.map(c=>c.length))*3.8; need(h+2);
+    cells.forEach((c,k)=>{ doc.setTextColor(k?30:100); c.forEach((l,j)=>txt(l,sx[k],y+j*3.8)); });
+    y+=h; doc.setDrawColor(225); doc.line(M,y-2,PW-M,y-2); y+=2.5; }
+  // historiques
+  y+=4; need(20); doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(20); txt('Historique des scores par dossier',M,y); y+=7;
+  if(!groups.length){ doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(90); txt('Aucun dossier validé.',M,y); y+=6; }
+  for(const g of groups){
+    need(30); doc.setFillColor(0,173,233); doc.rect(M,y-4,2,5.5,'F'); doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20); txt(g.category.toUpperCase(),M+4,y); y+=7;
+    for(const {d,results} of g.dossiers){
+      need(30); doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(30);
+      doc.splitTextToSize(d.title+` (${results.length} validation${results.length>1?'s':''})`,CW).forEach(l=>{ txt(l,M,y); y+=5; }); y+=1;
+      y=dossierSection(doc,y,results,namesOf(results)); y+=2;
+    }
+  }
+  const np=doc.getNumberOfPages();
+  for(let k=1;k<=np;k++){ doc.setPage(k); doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(130);
+    txt('Plateforme à but de formation : ne doit pas être utilisée pour la planification clinique.',PW/2,290,{align:'center'}); txt(`${name} · page ${k}/${np}`,PW-M,290,{align:'right'}); }
+  const safe=s=>s.replace(/Œ/g,'OE').replace(/œ/g,'oe').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
+  const filename=`Suivi_${safe(name)}.pdf`;
+  const dl=window.claude&&typeof claude.use==='function'?await claude.use('downloads'):null;
+  if(dl) await dl.save({filename,data:doc.output('blob')}); else doc.save(filename);
+}
+window.DiceHistory={render,exportStatsPdf,exportInternPdf};
 })();

@@ -534,7 +534,7 @@ async function showIntern(a){
       <div class="kv"><span>Nom</span><b>${esc((a.nom||'').toUpperCase())} ${esc(a.prenom||'')}</b><span>Adresse e-mail</span><b>${esc(a.email)}</b>
         <span>Subdivision</span><b>${esc(a.profile?.subdivision||'profil non complété')}</b><span>Début d'internat</span><b>${esc(a.profile?.annee||'—')}</b>
         <span>Compte créé le</span><b>${new Date(a.created).toLocaleDateString('fr-FR')}</b><span>Activation</span><b>${a.pw?'compte activé':'en attente (code non encore utilisé)'}</b></div>
-      <div class="tools">${a.pw?'':'<button class="btn" data-code>Nouveau code d\'activation</button>'}<button class="btn" data-reset>Réinitialiser le mot de passe</button><button class="btn danger" data-delete>Supprimer le compte</button></div></section>
+      <div class="tools"><button class="btn primary" data-ipdf>Exporter le suivi en PDF</button>${a.pw?'':'<button class="btn" data-code>Nouveau code d\'activation</button>'}<button class="btn" data-reset>Réinitialiser le mot de passe</button><button class="btn danger" data-delete>Supprimer le compte</button></div></section>
     <section class="card"><h2>Semestres</h2><div class="tscroll"><table class="htab semro"><thead><tr><th></th><th>Période</th><th>Spécialité</th><th>Terrain de stage</th></tr></thead><tbody>
       ${Array.from({length:10},(_,i)=>{ const s=sem[i]||{}; return `<tr><th scope="row">${SEM(i+1)}</th><td>${esc(s.periode||'')}</td><td>${esc(s.specialite||'')}</td><td>${esc(s.terrain||'')}</td></tr>`; }).join('')}</tbody></table></div></section>
     <section class="card"><h2>Historique des scores par dossier</h2>
@@ -543,6 +543,13 @@ async function showIntern(a){
       :'<div class="hint">Cet interne n\'a encore validé aucun dossier.</div>'}</section>`;
   box.querySelectorAll('.dsheet').forEach(el=>el.addEventListener('toggle',()=>{ if(!el.open||el.dataset.done) return; el.dataset.done=1;
     const d=ds.find(x=>x.id===el.dataset.d); DiceHistory.render(el.querySelector('.dbody'),d,byD.get(d.id).sort((x,y)=>x.date.localeCompare(y.date)),{embedded:true,who:`${a.prenom} ${(a.nom||'').toUpperCase()}`}); }));
+  const bp=box.querySelector('[data-ipdf]');
+  bp.onclick=async()=>{ bp.disabled=true; const t=bp.textContent; bp.textContent='Préparation…';
+    try{ const groups=cats.map(c=>({category:c,dossiers:ds.filter(d=>d.category===c).sort((x,y)=>x.title.localeCompare(y.title,'fr'))
+        .map(d=>({d,results:byD.get(d.id).slice().sort((x,y)=>x.date.localeCompare(y.date))}))}));
+      await DiceHistory.exportInternPdf(a,sem,groups); }
+    catch(e){ if(e&&e.code!=='declined') await message('Export PDF impossible',e.message||String(e)); }
+    finally{ bp.disabled=false; bp.textContent=t; } };
   bindAccountActions(box,a,()=>renderSuivi());
 }
 
