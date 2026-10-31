@@ -400,7 +400,7 @@ const yearOpts=sel=>Accounts.years().map(y=>`<option${y===sel?' selected':''}>${
 const subOpts=sel=>Accounts.SUBDIVISIONS.map(s=>`<option${s===sel?' selected':''}>${esc(s)}</option>`).join('');
 const pwFields=(p='')=>`<div class="field"><label for="${p}pw1">Mot de passe</label><input type="password" id="${p}pw1" autocomplete="new-password"></div>
   <div class="field"><label for="${p}pw2">Confirmation du mot de passe</label><input type="password" id="${p}pw2" autocomplete="new-password"></div>
-  <div class="hint">Au moins 12 caractères, dont au moins un chiffre.</div>`;
+  <div class="hint">Au moins 12 caractères, dont au moins un chiffre et une majuscule.</div>`;
 const readPw=(m,p='')=>{ const a=m.$('#'+p+'pw1').value, b=m.$('#'+p+'pw2').value; const pb=Accounts.pwProblem(a); if(pb) throw new Error(pb); if(a!==b) throw new Error('Les deux mots de passe ne sont pas identiques.'); return a; };
 // première ouverture du compte : profil à compléter, impossible à fermer sans le valider
 function profileSetup(){

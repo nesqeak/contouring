@@ -25,8 +25,9 @@ async function checkPw(acc,pw){ if(!acc||!acc.pw||!pw) return false; return (awa
 const newCode=()=>String(crypto.getRandomValues(new Uint32Array(1))[0]%100000000).padStart(8,'0');
 async function checkCode(acc,code){ code=String(code||'').replace(/\s+/g,''); if(!acc||!acc.activation||!/^\d{8}$/.test(code)) return false;
   return (await hashPw(code,acc.activation.salt,acc.activation.iter)).hash===acc.activation.hash; }
-// règle : au moins 12 caractères, dont au moins un chiffre
-const pwProblem=pw=>!pw||pw.length<12?'Le mot de passe doit contenir au moins 12 caractères.':!/\d/.test(pw)?'Le mot de passe doit contenir au moins un chiffre.':null;
+// règle : au moins 12 caractères, dont au moins un chiffre et une majuscule (lettres accentuées comprises)
+const pwProblem=pw=>!pw||pw.length<12?'Le mot de passe doit contenir au moins 12 caractères.':!/\d/.test(pw)?'Le mot de passe doit contenir au moins un chiffre.'
+  :!/\p{Lu}/u.test(pw)?'Le mot de passe doit contenir au moins une majuscule.':null;
 
 // ---- stockage ----
 function sharedBackend(db){
