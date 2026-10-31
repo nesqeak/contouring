@@ -128,7 +128,7 @@ async function exportPdf(d,results,names,who){
   const doc=new jsPDF({unit:'mm',format:'a4'}); let y=M;
   const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o);
   doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
-  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
+  txt('Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
   y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt(d.category||'—',M,y);
   y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); doc.splitTextToSize(d.title,CW).forEach(l=>{txt(l,M,y); y+=6;});
   if(who){ doc.setFontSize(10); doc.setTextColor(90); txt('Interne : '+who,M,y); y+=5; doc.setTextColor(20); }
@@ -149,7 +149,7 @@ async function exportStatsPdf(d,rows,info){
   const doc=new jsPDF({unit:'mm',format:'a4'}); let y=M;
   const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o), dash=v=>v==null||isNaN(v)?'-':pct(v);
   doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
-  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
+  txt('Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
   y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt(d.category||'-',M,y);
   y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); doc.splitTextToSize(d.title,CW).forEach(l=>{txt(l,M,y); y+=6;});
   y+=2; doc.setDrawColor(200); doc.line(M,y,PW-M,y); y+=8;
@@ -185,7 +185,7 @@ async function exportInternPdf(a,sem,groups){
   const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o), need=h=>{ if(y+h>282){ doc.addPage(); y=M; } };
   const name=`${(a.nom||'').toUpperCase()} ${a.prenom||''}`.trim();
   doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
-  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
+  txt('Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
   y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt('Suivi de l\'interne',M,y);
   y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); txt(name,M,y); y+=4;
   doc.setDrawColor(200); doc.line(M,y,PW-M,y); y+=8;
