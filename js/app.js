@@ -127,7 +127,7 @@ async function renderHome(){
   page.innerHTML=siteHeader()+`<div class="home">
     <header class="brand">
       <div><h1>Plateforme d'entraînement au contourage</h1><div class="sub">Dossiers cliniques classés par localisation tumorale</div></div>
-      ${admin?`<div class="admbar"><button class="btn primary" data-a="add">Ajouter un dossier</button><button class="btn" data-a="account">Créer un compte</button><a class="btn" href="#/suivi">Suivi des internes</a></div>`:''}
+      ${admin?`<div class="admbar"><button class="btn primary" data-a="add">Ajouter un dossier</button><button class="btn" data-a="account">Créer un compte</button><a class="btn" href="#/suivi">Suivi des internes</a><a class="btn" href="#/admins">Administrateurs</a></div>`:''}
     </header>
     ${ARTIFACT&&!shared?'<div class="errors"><b>Stockage partagé indisponible dans cette vue.</b> Ouvrez la plateforme depuis son lien claude.ai, en étant connecté à votre compte (pas dans un onglet séparé ni depuis un fichier enregistré). L\'ajout de dossiers est désactivé ici pour qu\'aucun dossier ne reste enfermé dans ce navigateur.</div>':''}
     ${storeOk?'':'<div class="errors">Ce navigateur bloque le stockage local : les dossiers chargés, les contours en cours et l\'historique des scores ne peuvent pas être enregistrés.</div>'}
@@ -171,7 +171,7 @@ async function renderHome(){
   const adds=page.querySelectorAll('#add,[data-a="add"]');
   if(shared&&!shared.canUpload) adds.forEach(b=>{ b.disabled=true; b.title='Ajout réservé aux éditeurs de l\'Artifact (menu Partager de claude.ai)'; });
   adds.forEach(b=>b.onclick=uploadForm);
-  page.querySelector('[data-a="account"]').onclick=createAccountModal;
+  page.querySelector('[data-a="account"]').onclick=()=>createAccountModal();
 }
 
 // dossier enregistré dans ce navigateur -> stockage partagé (même identifiant : historique et contours en cours suivent)
@@ -451,7 +451,7 @@ async function profileModal(){
 }
 
 // ---- création de compte (administrateur) ----
-function createAccountModal(){
+function createAccountModal(onCreated){
   const m=modal(`<h2>Créer un compte</h2>
     <div class="field"><label for="a-nom">Nom</label><input type="text" id="a-nom"></div>
     <div class="field"><label for="a-prenom">Prénom</label><input type="text" id="a-prenom"></div>
@@ -466,7 +466,7 @@ function createAccountModal(){
     try{ const nom=m.$('#a-nom').value.trim(), prenom=m.$('#a-prenom').value.trim(), email=m.$('#a-mail').value.trim(), role=m.box.querySelector('[name=a-role]:checked').value;
       if(!nom||!prenom) throw new Error('Renseignez le nom et le prénom.'); if(!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Adresse e-mail invalide.');
       const {account:a,code}=await Accounts.create({nom,prenom,email,role}); m.close();
-      showCode(a,code,'Compte créé'); }
+      showCode(a,code,'Compte créé'); if(onCreated) onCreated(); }
     catch(e){ err.textContent=e.message.charAt(0).toUpperCase()+e.message.slice(1)+'.'; } };
 }
 // code d'activation affiché une seule fois (il n'est conservé que sous forme hachée)
@@ -545,10 +545,16 @@ async function showIntern(a){
       :'<div class="hint">Cet interne n\'a encore validé aucun dossier.</div>'}</section>`;
   box.querySelectorAll('.dsheet').forEach(el=>el.addEventListener('toggle',()=>{ if(!el.open||el.dataset.done) return; el.dataset.done=1;
     const d=ds.find(x=>x.id===el.dataset.d); DiceHistory.render(el.querySelector('.dbody'),d,byD.get(d.id).sort((x,y)=>x.date.localeCompare(y.date)),{embedded:true,who:`${a.prenom} ${(a.nom||'').toUpperCase()}`}); }));
+  bindAccountActions(box,a,()=>renderSuivi());
+}
+
+// actions sur un compte (interne ou administrateur), toutes soumises au mot de passe de l'administrateur connecté
+function bindAccountActions(box,a,onDeleted){
   const bc=box.querySelector('[data-code]');
   if(bc) bc.onclick=async()=>{ if(!await askPassword('Nouveau code d\'activation pour '+fullName(a),checkAdminPw,'Confirmez avec votre mot de passe administrateur. L\'ancien code ne fonctionnera plus.')) return;
     const acc=await Accounts.backend.getAccount(a.id); showCode(acc,await Accounts.newActivation(acc),'Nouveau code d\'activation'); };
-  box.querySelector('[data-reset]').onclick=async()=>{
+  const br=box.querySelector('[data-reset]');
+  if(br) br.onclick=async()=>{
     if(!await askPassword('Réinitialiser le mot de passe de '+fullName(a),checkAdminPw,'Confirmez avec votre mot de passe administrateur.')) return;
     const m=modal(`<h2>Nouveau mot de passe pour ${esc(fullName(a))}</h2>${pwFields('r-')}<div class="pw-err" aria-live="polite"></div>
       <div class="actions"><button class="btn" data-x>Annuler</button><button class="btn primary" data-ok>Enregistrer</button></div>`);
@@ -556,7 +562,12 @@ async function showIntern(a){
     m.$('[data-ok]').onclick=async()=>{ try{ const acc=await Accounts.backend.getAccount(a.id); await Accounts.setPassword(acc,readPw(m,'r-')); m.close();
         await message('Mot de passe réinitialisé',`Communiquez le nouveau mot de passe à ${fullName(a)} ; il pourra le changer depuis son profil.`); }
       catch(e){ m.$('.pw-err').textContent=e.message; } }; };
-  box.querySelector('[data-delete]').onclick=()=>{
+  const bd=box.querySelector('[data-delete]');
+  if(bd) bd.onclick=async()=>{
+    if(a.role==='admin'){ // garde-fous : pas de suppression de son propre compte ni du dernier administrateur
+      if(a.id===Accounts.me.id) return message('Suppression impossible','Vous ne pouvez pas supprimer votre propre compte. Un autre administrateur peut le faire.');
+      const admins=(await Accounts.listAccounts()).filter(x=>x.role==='admin'&&x.id!==a.id&&x.pw);
+      if(!admins.length) return message('Suppression impossible','Il doit rester au moins un autre administrateur activé.'); }
     const m=modal(`<h2>Supprimer le compte de ${esc(fullName(a))}</h2>
       <div class="errors"><b>Attention, cette action est irréversible, toutes les données liées au compte sont perdues.</b></div>
       <div class="field"><label for="d-pw">Votre mot de passe administrateur</label><input type="password" id="d-pw" autocomplete="current-password"></div>
@@ -565,8 +576,25 @@ async function showIntern(a){
     m.$('[data-x]').onclick=m.close; m.$('#d-pw').focus();
     m.$('[data-ok]').onclick=async()=>{ const err=m.$('.pw-err'); err.textContent='';
       if(!await checkAdminPw(m.$('#d-pw').value)){ err.textContent='Mot de passe incorrect.'; return; }
-      try{ await Accounts.remove(a); m.close(); await message('Compte supprimé',`Le compte de ${fullName(a)} et ses résultats ont été supprimés.`); renderSuivi(); }
+      try{ await Accounts.remove(a); m.close(); await message('Compte supprimé',`Le compte de ${fullName(a)} et ses résultats ont été supprimés.`); onDeleted(); }
       catch(e){ err.textContent='Suppression impossible : '+e.message; } }; };
+}
+
+// ---- comptes administrateurs ----
+async function renderAdmins(){
+  page.innerHTML=siteHeader()+'<div class="loading">Chargement des comptes…</div>';
+  const ad=(await Accounts.listAccounts()).filter(a=>a.role==='admin').sort(Accounts.byName), me=Accounts.me;
+  page.innerHTML=siteHeader()+`<div class="hist">
+    <header class="vtop"><a class="btn" href="#/">← Menu</a><div class="vtitle"><h1>Comptes administrateurs</h1><span class="meta">${ad.length} compte${ad.length>1?'s':''}</span></div>
+      <span class="grow"></span><button class="btn primary" data-a="account">Créer un compte</button></header>
+    <section class="card"><div class="tscroll"><table class="htab admtab"><thead><tr><th>Nom</th><th>Adresse e-mail</th><th>Subdivision</th><th>Activation</th><th>Créé le</th><th></th></tr></thead><tbody>
+      ${ad.map(a=>`<tr data-id="${a.id}"><td>${esc((a.nom||'').toUpperCase())} ${esc(a.prenom||'')}${a.id===me.id?' <span class="tag me">vous</span>':''}</td><td>${esc(a.email)}</td>
+        <td>${esc(a.profile?.subdivision||'—')}</td><td>${a.pw?'activé':'en attente'}</td><td>${new Date(a.created).toLocaleDateString('fr-FR')}</td>
+        <td><div class="acts">${a.pw?'':'<button class="btn" data-code>Nouveau code</button>'}${a.id===me.id?'':'<button class="btn" data-reset>Réinitialiser le mot de passe</button><button class="btn danger" data-delete>Supprimer</button>'}</div></td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="hint">Vous ne pouvez pas supprimer votre propre compte ; il doit toujours rester au moins un autre administrateur activé. Votre mot de passe se change depuis « Profil ».</div></section></div>`;
+  page.querySelectorAll('.admtab tr[data-id]').forEach(tr=>bindAccountActions(tr,ad.find(a=>a.id===tr.dataset.id),()=>renderAdmins()));
+  page.querySelector('[data-a="account"]').onclick=()=>createAccountModal(()=>renderAdmins());
 }
 
 // ---- navigation ----
@@ -588,6 +616,7 @@ async function route(){
     return DiceHistory.render(page.querySelector('#hroot'),d||{id,title:'Dossier supprimé',category:'',targets:[]},res); }
   if(r==='stats'&&id&&isAdmin()) return renderStats(id);
   if(r==='suivi'&&isAdmin()) return renderSuivi();
+  if(r==='admins'&&isAdmin()) return renderAdmins();
   if(r) { path=''; try{ history.replaceState(null,'','#/'); }catch(e){} }
   return renderHome();
 }
