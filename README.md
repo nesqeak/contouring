@@ -20,7 +20,7 @@ Toutes les pages portent l'en-tête « Service de Radiothérapie » avec le logo
 - **Création des comptes** : par un administrateur (bouton **Créer un compte**) : nom, prénom, adresse e-mail (identifiant) et type de compte, **Étudiant** ou **Administrateur**. Le site génère un **code d'activation à 8 chiffres**, affiché une seule fois (bouton pour le copier) et conservé uniquement sous forme hachée ; l'administrateur le transmet à la personne.
 - **Première connexion** : adresse e-mail et code d'activation (le champ du code remplace celui du mot de passe pour un compte non activé), puis le profil s'affiche et doit être complété : subdivision (Clermont-Ferrand, Grenoble, Lyon, Saint-Etienne), année de début d'internat (de 2000 à l'année en cours, étudiants seulement) et mot de passe (au moins 12 caractères, dont un chiffre et une majuscule). Ces informations ne sont plus modifiables ensuite, sauf le mot de passe.
 - **Profil** (bouton en haut de page) : rappel des informations, changement du mot de passe (protégé par le mot de passe actuel) et, pour les internes, la liste de leurs semestres (10 lignes, du 1er au 10ème semestre : période, spécialité, terrain de stage).
-- **Interne** : liste des dossiers avec Histoire clinique, Contourage (mot de passe du dossier) et Historique de ses propres scores.
+- **Interne** : liste des dossiers avec Histoire clinique, Contourage et Historique de ses propres scores.
 - **Administrateur** : liste des dossiers avec **Statistiques** (moyenne, médiane, écart type, minimum et maximum du Dice par structure, sur la dernière validation de chaque interne), ajout et suppression de dossiers sans mot de passe supplémentaire, **Créer un compte** et **Suivi des internes**.
 - **Administrateurs** (bouton sur l'accueil administrateur) : liste des comptes administrateurs (nom, e-mail, subdivision, état d'activation, date de création) avec, pour les autres administrateurs, **Nouveau code** (compte non activé), **Réinitialiser le mot de passe** et **Supprimer** (avertissement d'irréversibilité, mot de passe administrateur requis). On ne peut pas supprimer son propre compte, et il doit toujours rester au moins un autre administrateur activé.
 - **Suivi des internes** : menu déroulant des internes par ordre alphabétique (nom, prénom, subdivision, année de début), filtrable par subdivision et par année. Pour l'interne choisi : profil, semestres en consultation, fiches d'historique des scores par dossier, groupées par localisation dans des menus repliables. État d'activation du compte ; pour un compte pas encore activé, bouton **Nouveau code d'activation** (mot de passe administrateur requis, l'ancien code cesse de fonctionner). Boutons **Réinitialiser le mot de passe** (après saisie du mot de passe administrateur, l'administrateur choisit le nouveau mot de passe) et **Supprimer le compte** (avertissement d'irréversibilité, mot de passe administrateur requis ; le compte et ses résultats sont supprimés).
@@ -32,12 +32,12 @@ Les mots de passe sont stockés hachés (PBKDF2-SHA-256, 150 000 itérations, se
 Les dossiers sont classés par localisation tumorale (Crâne, ORL, Sein, Poumon, Œsophage, Foie, Pancréas, Rein, Col utérin, Endomètre, Vessie, Prostate, Rectum, Canal anal, Os). Chaque ligne donne accès à :
 
 - **Histoire clinique** : le PDF du dossier ;
-- **Contourage** : ouverture dans la visionneuse, après saisie du mot de passe du dossier ;
+- **Contourage** : ouverture dans la visionneuse (sans mot de passe propre au dossier : il faut être connecté à son compte pour voir la liste) ;
 - **Historique** : scores Dice des sessions validées, courbes de progression et export PDF.
 
 ### Ajouter un dossier
 
-Bouton **Ajouter un dossier** (comptes administrateurs). La fenêtre demande le nom du dossier, le type tumoral, les images DICOM (fichiers ou dossier), le fichier structure (RTSTRUCT), le PDF de l'histoire clinique et le mot de passe d'ouverture du dossier. Une fois le RTSTRUCT choisi, ses structures s'affichent une par ligne avec deux cases : **Structure à charger** (cochée par défaut, sauf pour une structure sans contour) et **Structure cible**. Une case en haut de la liste coche ou décoche d'un coup toutes les structures à charger. Seules les structures à charger sont ajoutées au dossier. Une cible est toujours chargée : elle est créée vide, sous son nom du RTSTRUCT, pour être contourée, et son contour du fichier sert de référence au Dice.
+Bouton **Ajouter un dossier** (comptes administrateurs). La fenêtre demande le nom du dossier, le type tumoral, les images DICOM (fichiers ou dossier), le fichier structure (RTSTRUCT), et le PDF de l'histoire clinique. Une fois le RTSTRUCT choisi, ses structures s'affichent une par ligne avec deux cases : **Structure à charger** (cochée par défaut, sauf pour une structure sans contour) et **Structure cible**. Une case en haut de la liste coche ou décoche d'un coup toutes les structures à charger. Seules les structures à charger sont ajoutées au dossier. Une cible est toujours chargée : elle est créée vide, sous son nom du RTSTRUCT, pour être contourée, et son contour du fichier sert de référence au Dice.
 
 Le chargement est refusé, avec la liste des erreurs, si un élément manque, si les images ou le RTSTRUCT sont illisibles, si aucune structure n'est cochée comme cible, si deux cibles portent le même nom ou si le contour d'une cible ne recoupe pas les images.
 
@@ -49,7 +49,7 @@ Où le dossier est enregistré dépend de la façon dont la plateforme est servi
 ```bash
 python3 scripts/ajouter_dossier.py --id orl-01 --titre "Oropharynx T2N1" --categorie ORL \
     --images chemin/CT/ --rtstruct RS.dcm --pdf histoire.pdf \
-    --cible CTV_T --cible CTV_N --charger Moelle --charger Parotide_G --mot-de-passe secret
+    --cible CTV_T --cible CTV_N --charger Moelle --charger Parotide_G
 ```
 
 (`--charger`, facultatif et répétable, limite les structures non cibles affichées ; sans lui, toutes les structures du RTSTRUCT sont chargées.)
@@ -103,6 +103,6 @@ Pour chaque dossier : tableau des Dice par validation, courbes de progression av
 
 ## Limites
 
-Les comptes et les mots de passe (comptes et dossiers) sont vérifiés dans le navigateur : ils organisent l'accès dans le cadre d'une formation mais ne constituent pas une protection forte. Toute personne ayant accès à la base partagée peut techniquement lire les données (dont les empreintes des mots de passe) et contourner les contrôles de la page ; seul un serveur avec authentification (Supabase, serveur des HCL) les appliquerait réellement. Les fichiers publiés restent téléchargeables par qui connaît leur adresse. D'où l'exigence d'anonymisation.
+Les comptes et leurs mots de passe sont vérifiés dans le navigateur : ils organisent l'accès dans le cadre d'une formation mais ne constituent pas une protection forte. Toute personne ayant accès à la base partagée peut techniquement lire les données (dont les empreintes des mots de passe) et contourner les contrôles de la page ; seul un serveur avec authentification (Supabase, serveur des HCL) les appliquerait réellement. Les fichiers publiés restent téléchargeables par qui connaît leur adresse. D'où l'exigence d'anonymisation.
 
 Dans l'Artifact claude.ai, seuls le propriétaire et les personnes invitées par e-mail comme éditeurs (lien public désactivé) peuvent écrire dans la base partagée : les internes doivent donc être invités ainsi pour enregistrer leur profil et leurs scores.

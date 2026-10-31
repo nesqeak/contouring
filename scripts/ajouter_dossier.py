@@ -5,11 +5,11 @@ dossiers/<id>/ et ajoute l'entrée correspondante à dossiers/catalogue.json.
 Exemple :
   python3 scripts/ajouter_dossier.py --id orl-01 --titre "Oropharynx T2N1" --categorie ORL \
       --images chemin/vers/CT/ --rtstruct RS.dcm --pdf histoire.pdf \
-      --cible CTV_T --cible CTV_N --mot-de-passe secret
+      --cible CTV_T --cible CTV_N
 
 Les fichiers doivent être anonymisés avant publication.
 """
-import argparse, hashlib, json, pathlib, shutil, sys
+import argparse, json, pathlib, shutil, sys
 
 CATEGORIES = ['Crâne', 'ORL', 'Sein', 'Poumon', 'Œsophage', 'Foie', 'Pancréas', 'Rein',
               'Col utérin', 'Endomètre', 'Vessie', 'Prostate', 'Rectum', 'Canal anal', 'Os']
@@ -26,7 +26,6 @@ def main():
     p.add_argument('--pdf', required=True, type=pathlib.Path)
     p.add_argument('--cible', action='append', required=True, help='structure à contourer (répéter)')
     p.add_argument('--charger', action='append', help='structure non cible à afficher (répéter ; par défaut toutes)')
-    p.add_argument('--mot-de-passe', required=True)
     a = p.parse_args()
 
     if not a.id.replace('-', '').isalnum():
@@ -52,7 +51,6 @@ def main():
     cat['dossiers'] = [d for d in cat['dossiers'] if d['id'] != a.id]
     cat['dossiers'].append({
         'id': a.id, 'titre': a.titre, 'categorie': a.categorie, 'cibles': a.cible,
-        'mot_de_passe_sha256': hashlib.sha256(a.mot_de_passe.encode('utf-8')).hexdigest(),
         **({'structures': a.cible + a.charger} if a.charger else {}),
         'pdf': f'dossiers/{a.id}/histoire.pdf', 'rtstruct': f'dossiers/{a.id}/rtstruct.dcm', 'images': noms,
     })

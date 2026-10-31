@@ -3,7 +3,6 @@
 const CATEGORIES=['Crâne','ORL','Sein','Poumon','Œsophage','Foie','Pancréas','Rein','Col utérin','Endomètre','Vessie','Prostate','Rectum','Canal anal','Os'];
 const page=document.getElementById('page'), modalRoot=document.getElementById('modal-root');
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const unlocked=new Set(); // dossiers ouverts avec le bon mot de passe pendant cette visite
 let current=null; // visionneuse ouverte
 // navigation interne : dans la fenêtre d'un Artifact, le fragment d'URL ne peut pas porter de chemin
 let path=location.hash.replace(/^#\/?/,'');
@@ -24,7 +23,7 @@ async function loadCatalogue(){
   try{ const r=await fetch('dossiers/catalogue.json',{cache:'no-cache'}); if(!r.ok) return [];
     const j=await r.json();
     return (j.dossiers||[]).map(d=>({id:'cat-'+d.id,source:'catalogue',title:d.titre,category:d.categorie,targets:d.cibles||[],structures:d.structures,
-      pwHash:d.mot_de_passe_sha256,pdf:d.pdf,rtss:d.rtstruct,images:d.images||[]})); }
+      pdf:d.pdf,rtss:d.rtstruct,images:d.images||[]})); }
   catch(e){ return []; }
 }
 async function loadAll(){
@@ -103,7 +102,6 @@ function message(title,text){
     const b=m.$('button'); b.focus(); b.onclick=()=>{m.close();res();}; });
 }
 window.UI={message};
-const checkDossierPw=d=>async pw=>(await Store.sha256(pw))===d.pwHash;
 
 // ---- en-tête commun : logo HCL, « Service de Radiothérapie », compte connecté ----
 function siteHeader(){
@@ -118,7 +116,7 @@ function siteHeader(){
 }
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-act]'); if(!b) return;
   if(b.dataset.act==='profil') profileModal();
-  else if(b.dataset.act==='logout'){ Accounts.logout(); unlocked.clear(); go('#/'); } });
+  else if(b.dataset.act==='logout'){ Accounts.logout(); go('#/'); } });
 
 // ---- menu principal ----
 async function renderHome(){
@@ -153,8 +151,8 @@ async function renderHome(){
       const a=row.querySelector('[data-pdf]');
       if(d.source==='shared'?!d.pdf:d.source==='catalogue'?!d.pdf:false) a.hidden=true;
       a.onclick=()=>openPdf(d,a);
-      row.querySelector('[data-open]').onclick=async()=>{
-        if(admin||await askPassword('Ouvrir « '+d.title+' »',checkDossierPw(d))){ unlocked.add(d.id); go('#/contourage/'+encodeURIComponent(d.id)); } };
+      row.querySelector('[data-open]').onclick=()=>{
+        go('#/contourage/'+encodeURIComponent(d.id)); };
       const sh=row.querySelector('[data-share]');
       if(sh) sh.onclick=()=>shareLocal(d,sh);
       const del=row.querySelector('[data-del]');
@@ -211,7 +209,6 @@ function uploadForm(){
     <div class="field"><span class="lab">Structures du fichier structure</span>
       <div class="hint" id="u-shint">Chargez le fichier structure pour choisir les structures du dossier.</div>
       <div class="tscroll" id="u-swrap" hidden><table class="stab"><thead><tr><th>Structure</th><th>Structure à charger</th><th>Structure cible</th></tr><tr class="all"><td><label for="u-all">Tout cocher / tout décocher</label></td><td><input type="checkbox" id="u-all" aria-label="Charger toutes les structures"></td><td></td></tr></thead><tbody id="u-structs"></tbody></table></div></div>
-    <div class="field"><label for="u-pw">Mot de passe d'ouverture du dossier</label><input type="password" id="u-pw" autocomplete="new-password"></div>
     <div class="errors" id="u-err" hidden></div>
     <div class="actions"><button class="btn" id="u-cancel">Annuler</button><button class="btn primary" id="u-ok">Valider le chargement</button></div>`,{wide:true});
   const F={images:[],rtss:null,pdf:null};
@@ -263,7 +260,7 @@ function uploadForm(){
   m.$('#u-cancel').onclick=m.close;
   const showErr=errs=>{ const b=m.$('#u-err'); b.innerHTML='<b>Le dossier ne peut pas être chargé :</b><ul>'+errs.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>'; b.hidden=false; b.scrollIntoView({block:'nearest'}); };
   m.$('#u-ok').onclick=async()=>{
-    const title=m.$('#u-title').value.trim(), category=m.$('#u-cat').value, pw=m.$('#u-pw').value;
+    const title=m.$('#u-title').value.trim(), category=m.$('#u-cat').value;
     const rows=[...sb.children], sel=rows.filter(tr=>tr.querySelector('[data-load]').checked), tgt=rows.filter(tr=>tr.querySelector('[data-target]').checked);
     const errs=[];
     if(!title) errs.push('Le nom du dossier est manquant.');
@@ -277,7 +274,6 @@ function uploadForm(){
     else if(F.rs&&!tgt.length) errs.push('Aucune structure n\'est cochée comme structure cible.');
     const names=tgt.map(tr=>F.rs.rois[tr.dataset.k].name), dup=names.filter((t,i)=>names.findIndex(x=>DICOM.normName(x)===DICOM.normName(t))!==i);
     if(dup.length) errs.push('Plusieurs structures cibles portent le même nom : '+[...new Set(dup)].join(', ')+'.');
-    if(!pw) errs.push('Le mot de passe d\'ouverture du dossier est manquant.');
     const fusIn=FUS.filter(f=>!f.removed);
     fusIn.forEach((f,i)=>{ if(!f.images.length) errs.push(`Imagerie de fusion n° ${i+1} : aucune image DICOM n'est chargée.`); });
     if(errs.length) return showErr(errs);
@@ -299,7 +295,7 @@ function uploadForm(){
           fusions.push({name:f.nameEl.value.trim()||[FV.modality,FV.description].filter(Boolean).join(' · ')||lab,modality:FV.modality,data}); }
         catch(e){ errs.push(`${lab} : ${e.message}.`); } }
       if(errs.length) return showErr(errs);
-      const d={id:'loc-'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),title,category,targets:targets.map(r=>r.name),structures:rois.map(r=>r.name),pwHash:await Store.sha256(pw),created:new Date().toISOString(),
+      const d={id:'loc-'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),title,category,targets:targets.map(r=>r.name),structures:rois.map(r=>r.name),created:new Date().toISOString(),
         dims:[V.NX,V.NY,V.NZ],fusions:fusions.map(f=>({name:f.name,modality:f.modality}))};
       if(shared){ ok.textContent='Envoi… 0 %';
         await shared.add(d,V,rois,F.pdf,p=>ok.textContent='Envoi… '+Math.round(p*100)+' %',fusions);
@@ -318,11 +314,6 @@ function uploadForm(){
 async function renderViewer(id){
   const d=await findDossier(id);
   if(!d){ page.innerHTML=siteHeader()+'<div class="loading error">Dossier introuvable. <a href="#/">Retour au menu</a></div>'; return; }
-  if(!unlocked.has(id)&&!isAdmin()){
-    page.innerHTML='';
-    if(!await askPassword('Ouvrir « '+d.title+' »',checkDossierPw(d))){ go('#/'); return; }
-    unlocked.add(id);
-  }
   page.innerHTML=siteHeader()+'<div class="loading"><div id="lmsg">Chargement des images…</div><div class="bar"><i></i></div></div>';
   const bar=page.querySelector('.bar i'), msg=page.querySelector('#lmsg');
   try{
