@@ -15,7 +15,7 @@ python3 -m http.server 8000
 
 ### Comptes et connexion
 
-Toutes les pages portent l'en-tête « Service de Radiothérapie » avec le logo des HCL. La page d'accueil permet de se connecter avec une adresse e-mail et un mot de passe. Au tout premier démarrage (aucun compte), elle propose de créer le compte administrateur principal, avec son mot de passe.
+Toutes les pages portent un bandeau avec le logo des HCL et le titre « Plateforme d'entraînement au contourage ». La page d'accueil permet de se connecter avec une adresse e-mail et un mot de passe. Au tout premier démarrage (aucun compte), elle propose de créer le compte administrateur principal, avec son mot de passe.
 
 - **Création des comptes** : par un administrateur (bouton **Créer un compte**) : nom, prénom, adresse e-mail (identifiant) et type de compte, **Étudiant** ou **Administrateur**. Le site génère un **code d'activation à 8 chiffres**, affiché une seule fois (bouton pour le copier) et conservé uniquement sous forme hachée ; l'administrateur le transmet à la personne.
 - **Première connexion** : adresse e-mail et code d'activation (le champ du code remplace celui du mot de passe pour un compte non activé), puis le profil s'affiche et doit être complété : subdivision (Clermont-Ferrand, Grenoble, Lyon, Saint-Etienne), année de début d'internat (de 2000 à l'année en cours, étudiants seulement) et mot de passe (au moins 12 caractères, dont un chiffre et une majuscule). Ces informations ne sont plus modifiables ensuite, sauf le mot de passe.

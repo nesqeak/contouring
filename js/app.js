@@ -103,12 +103,12 @@ function message(title,text){
 }
 window.UI={message};
 
-// ---- en-tête commun : logo HCL, « Service de Radiothérapie », compte connecté ----
+// ---- en-tête commun : logo HCL, titre de la plateforme, compte connecté ----
 function siteHeader(){
   const u=Accounts.me;
   return `<header class="sitebar"><div class="sb-in">
     <img class="sb-logo" src="assets/logo-hcl.png" alt="Hospices Civils de Lyon">
-    <div class="sb-t"><b>Service de Radiothérapie</b><span>Plateforme d'entraînement au contourage</span></div>
+    <div class="sb-t"><b>Plateforme d'entraînement au contourage</b></div>
     <span class="grow"></span>
     ${u?`<span class="sb-user">${esc(fullName(u))}<small>${u.role==='admin'?'Administrateur':'Interne'}</small></span>
       <button class="btn" data-act="profil">Profil</button><button class="btn" data-act="logout">Déconnexion</button>`:''}
