@@ -21,6 +21,10 @@ async function hashPw(pw,salt,iter=ITER){
   return {salt,hash:hex(bits),iter};
 }
 async function checkPw(acc,pw){ if(!acc||!acc.pw||!pw) return false; return (await hashPw(pw,acc.pw.salt,acc.pw.iter)).hash===acc.pw.hash; }
+// code d'activation : 8 chiffres, transmis par l'administrateur, demandé à la première connexion (stocké haché)
+const newCode=()=>String(crypto.getRandomValues(new Uint32Array(1))[0]%100000000).padStart(8,'0');
+async function checkCode(acc,code){ code=String(code||'').replace(/\s+/g,''); if(!acc||!acc.activation||!/^\d{8}$/.test(code)) return false;
+  return (await hashPw(code,acc.activation.salt,acc.activation.iter)).hash===acc.activation.hash; }
 // règle : au moins 12 caractères, dont au moins un chiffre
 const pwProblem=pw=>!pw||pw.length<12?'Le mot de passe doit contenir au moins 12 caractères.':!/\d/.test(pw)?'Le mot de passe doit contenir au moins un chiffre.':null;
 
@@ -59,7 +63,7 @@ const ss={ get:()=>{ try{ return sessionStorage.getItem(SKEY); }catch(e){ return
 const byName=(a,b)=>(a.nom||'').localeCompare(b.nom||'','fr',{sensitivity:'base'})||(a.prenom||'').localeCompare(b.prenom||'','fr',{sensitivity:'base'});
 
 window.Accounts={
-  SUBDIVISIONS, years, pwProblem, checkPw, hashPw, normEmail, byName,
+  SUBDIVISIONS, years, pwProblem, checkPw, checkCode, hashPw, normEmail, byName,
   init(sharedDb){ B=sharedDb?sharedBackend(sharedDb):localBackend(); return B; },
   get backend(){ return B; },
   get me(){ return me; },
@@ -69,14 +73,18 @@ window.Accounts={
   async findByEmail(email){ const e=normEmail(email); return (await B.listAccounts()).find(a=>a.email===e)||null; },
   async login(acc){ me=acc; ss.set(acc.id); },
   logout(){ me=null; ss.set(null); },
-  async create({nom,prenom,email,role}){
+  // pw : compte créé avec son mot de passe (administrateur du premier démarrage) ; sinon un code d'activation est généré
+  async create({nom,prenom,email,role,pw}){
     const e=normEmail(email);
     if(await this.findByEmail(e)) throw new Error('un compte existe déjà avec cette adresse e-mail');
-    const a={id:rid('u-'),nom:nom.trim(),prenom:prenom.trim(),email:e,role,created:new Date().toISOString(),pw:null,profileDone:false,profile:null,semestres:[]};
-    await B.putAccount(a); return a;
+    const code=pw?null:newCode();
+    const a={id:rid('u-'),nom:nom.trim(),prenom:prenom.trim(),email:e,role,created:new Date().toISOString(),pw:pw?await hashPw(pw):null,
+      activation:code?await hashPw(code):null,profileDone:false,profile:null,semestres:[]};
+    await B.putAccount(a); return {account:a,code};
   },
+  async newActivation(a){ const code=newCode(); a.pw=null; a.activation=await hashPw(code); await this.save(a); return code; },
   async save(a){ await B.putAccount(a); if(me&&me.id===a.id) me=a; return a; },
-  async setPassword(a,pw){ a.pw=await hashPw(pw); return this.save(a); },
+  async setPassword(a,pw){ a.pw=await hashPw(pw); a.activation=null; return this.save(a); },
   async remove(a){ for(const r of await B.listResults({account:a.id})) await B.deleteResult(r.id); await B.deleteAccount(a.id); },
   results:(q)=>B.listResults(q).then(l=>l.sort((x,y)=>x.date.localeCompare(y.date))),
   addResult:(r)=>B.addResult({id:rid('r-'),...r}),

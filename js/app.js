@@ -357,16 +357,18 @@ async function renderLogin(){
     <p class="sub">Entraînement au contourage des volumes cibles sur des dossiers cliniques anonymisés, avec calcul du Dice par rapport au contour de référence.</p>
     ${err?`<div class="errors">Les comptes ne peuvent pas être lus : ${esc(err.message||String(err))}</div>`:first?`
     <form class="card lform" id="boot"><h2>Premier démarrage</h2>
-      <div class="hint">Aucun compte n'existe encore. Créez le compte administrateur principal ; vous choisirez ensuite votre mot de passe.</div>
+      <div class="hint">Aucun compte n'existe encore. Créez le compte administrateur principal.</div>
       <div class="field"><label for="b-nom">Nom</label><input type="text" id="b-nom" autocomplete="family-name"></div>
       <div class="field"><label for="b-prenom">Prénom</label><input type="text" id="b-prenom" autocomplete="given-name"></div>
       <div class="field"><label for="b-mail">Adresse e-mail</label><input type="email" id="b-mail" autocomplete="email"></div>
+      ${pwFields('b-')}
       <div class="pw-err" aria-live="polite"></div>
       <button class="btn primary">Créer le compte administrateur</button></form>`:`
     <form class="card lform" id="login"><h2>Connexion</h2>
       <div class="field"><label for="l-mail">Adresse e-mail</label><input type="email" id="l-mail" autocomplete="username"></div>
-      <div class="field"><label for="l-pw">Mot de passe</label><input type="password" id="l-pw" autocomplete="current-password"></div>
-      <div class="hint">Première connexion : saisissez seulement votre adresse e-mail, vous choisirez ensuite votre mot de passe.</div>
+      <div class="field" id="l-pwf"><label for="l-pw">Mot de passe</label><input type="password" id="l-pw" autocomplete="current-password"></div>
+      <div class="field" id="l-codef" hidden><label for="l-code">Code d'activation (8 chiffres)</label><input type="text" id="l-code" inputmode="numeric" autocomplete="one-time-code" maxlength="9"></div>
+      <div class="hint" id="l-hint">Première connexion : saisissez votre adresse e-mail et le code d'activation à 8 chiffres transmis par l'administrateur (laissez le mot de passe vide).</div>
       <div class="pw-err" aria-live="polite"></div>
       <button class="btn primary">Se connecter</button></form>`}
     <footer class="disclaimer"><b>Avertissement :</b> cette plateforme est destinée exclusivement à la formation. Elle ne doit pas être utilisée pour la planification clinique des traitements.</footer>
@@ -374,14 +376,21 @@ async function renderLogin(){
   const f=page.querySelector('form'); if(!f) return;
   const errEl=f.querySelector('.pw-err'), btn=f.querySelector('button');
   f.querySelector('input').focus();
+  const lm=f.querySelector('#l-mail'); // autre adresse : on revient au champ mot de passe
+  if(lm) lm.oninput=()=>{ f.querySelector('#l-codef').hidden=true; f.querySelector('#l-pwf').hidden=false; errEl.textContent=''; };
   f.onsubmit=async e=>{ e.preventDefault(); errEl.textContent=''; btn.disabled=true;
     try{
       if(first){ const nom=f.querySelector('#b-nom').value.trim(), prenom=f.querySelector('#b-prenom').value.trim(), email=f.querySelector('#b-mail').value.trim();
         if(!nom||!prenom||!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Renseignez le nom, le prénom et une adresse e-mail valide.');
-        await Accounts.login(await Accounts.create({nom,prenom,email,role:'admin'})); return route(); }
+        const pw=readPw({$:q=>f.querySelector(q)},'b-');
+        await Accounts.login((await Accounts.create({nom,prenom,email,role:'admin',pw})).account); return route(); }
       const acc=await Accounts.findByEmail(f.querySelector('#l-mail').value);
       if(!acc) throw new Error('Aucun compte ne correspond à cette adresse e-mail.');
-      if(acc.pw&&!await Accounts.checkPw(acc,f.querySelector('#l-pw').value)) throw new Error('Mot de passe incorrect.');
+      if(acc.pw){ if(!await Accounts.checkPw(acc,f.querySelector('#l-pw').value)) throw new Error('Mot de passe incorrect.'); }
+      else { // compte pas encore activé : code d'activation obligatoire
+        const cf=f.querySelector('#l-codef');
+        if(cf.hidden){ cf.hidden=false; f.querySelector('#l-pwf').hidden=true; f.querySelector('#l-hint').textContent='Ce compte n\'est pas encore activé : saisissez le code d\'activation à 8 chiffres transmis par l\'administrateur.'; f.querySelector('#l-code').focus(); btn.disabled=false; return; }
+        if(!acc.activation||!await Accounts.checkCode(acc,f.querySelector('#l-code').value)) throw new Error('Code d\'activation incorrect.'); }
       await Accounts.login(acc); route();
     }catch(e){ errEl.textContent=e.message; btn.disabled=false; } };
 }
@@ -395,13 +404,13 @@ const pwFields=(p='')=>`<div class="field"><label for="${p}pw1">Mot de passe</la
 const readPw=(m,p='')=>{ const a=m.$('#'+p+'pw1').value, b=m.$('#'+p+'pw2').value; const pb=Accounts.pwProblem(a); if(pb) throw new Error(pb); if(a!==b) throw new Error('Les deux mots de passe ne sont pas identiques.'); return a; };
 // première ouverture du compte : profil à compléter, impossible à fermer sans le valider
 function profileSetup(){
-  const u=Accounts.me, st=u.role!=='admin';
+  const u=Accounts.me, st=u.role!=='admin', hasPw=!!u.pw;
   return new Promise(res=>{
     const m=modal(`<h2>Compléter votre profil</h2>
       <div class="kv"><span>Nom</span><b>${esc(fullName(u))}</b><span>Adresse e-mail</span><b>${esc(u.email)}</b></div>
       <div class="field"><label for="p-sub">Subdivision</label><select id="p-sub"><option value="">— Choisir —</option>${subOpts()}</select></div>
       ${st?`<div class="field"><label for="p-year">Année de début d'internat</label><select id="p-year"><option value="">— Choisir —</option>${yearOpts()}</select></div>`:''}
-      ${pwFields()}
+      ${hasPw?'':pwFields()}
       <div class="notice">Une fois validées, ces informations ne pourront plus être modifiées, en dehors du mot de passe.</div>
       <div class="pw-err" aria-live="polite"></div>
       <div class="actions"><button class="btn" data-x>Se déconnecter</button><button class="btn primary" data-ok>Valider mon profil</button></div>`);
@@ -409,8 +418,8 @@ function profileSetup(){
     m.$('[data-ok]').onclick=async()=>{ const err=m.$('.pw-err'); err.textContent='';
       try{ const sub=m.$('#p-sub').value, year=st?+m.$('#p-year').value:null;
         if(!sub) throw new Error('Choisissez votre subdivision.'); if(st&&!year) throw new Error('Choisissez votre année de début d\'internat.');
-        const pw=readPw(m), a=await Accounts.refresh();
-        a.profile=st?{subdivision:sub,annee:year}:{subdivision:sub}; a.profileDone=true; a.pw=await Accounts.hashPw(pw); if(st&&!a.semestres) a.semestres=[];
+        const pw=hasPw?null:readPw(m), a=await Accounts.refresh();
+        a.profile=st?{subdivision:sub,annee:year}:{subdivision:sub}; a.profileDone=true; if(pw){ a.pw=await Accounts.hashPw(pw); a.activation=null; } if(st&&!a.semestres) a.semestres=[];
         await Accounts.save(a); m.close(); res(); }
       catch(e){ err.textContent=e.message; } };
     m.$('#p-sub').focus();
@@ -456,9 +465,19 @@ function createAccountModal(){
   m.$('[data-ok]').onclick=async()=>{ const err=m.$('.pw-err'); err.textContent='';
     try{ const nom=m.$('#a-nom').value.trim(), prenom=m.$('#a-prenom').value.trim(), email=m.$('#a-mail').value.trim(), role=m.box.querySelector('[name=a-role]:checked').value;
       if(!nom||!prenom) throw new Error('Renseignez le nom et le prénom.'); if(!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Adresse e-mail invalide.');
-      const a=await Accounts.create({nom,prenom,email,role}); m.close();
-      await message('Compte créé',`${fullName(a)} (${role==='admin'?'administrateur':'étudiant'}) pourra se connecter avec l'adresse ${a.email} : à la première connexion, l'e-mail suffit, puis il complète son profil et choisit son mot de passe.`); }
+      const {account:a,code}=await Accounts.create({nom,prenom,email,role}); m.close();
+      showCode(a,code,'Compte créé'); }
     catch(e){ err.textContent=e.message.charAt(0).toUpperCase()+e.message.slice(1)+'.'; } };
+}
+// code d'activation affiché une seule fois (il n'est conservé que sous forme hachée)
+function showCode(a,code,title){
+  const m=modal(`<h2>${esc(title)}</h2>
+    <div>${esc(fullName(a))} (${a.role==='admin'?'administrateur':'étudiant'}) se connectera avec l'adresse <b>${esc(a.email)}</b> et ce code d'activation :</div>
+    <div class="code" aria-label="Code d'activation">${code.slice(0,4)} ${code.slice(4)}</div>
+    <div class="notice">Notez ou transmettez ce code maintenant : il ne sera plus affiché. À la première connexion, il est demandé avant de compléter le profil et de choisir le mot de passe. En cas de perte, un nouveau code peut être généré depuis le suivi des internes.</div>
+    <div class="actions"><button class="btn" data-copy>Copier le code</button><button class="btn primary" data-x>Fermer</button></div>`);
+  m.$('[data-x]').onclick=m.close;
+  m.$('[data-copy]').onclick=async e=>{ try{ await navigator.clipboard.writeText(code); e.target.textContent='Code copié'; }catch(err){ const r=document.createRange(); r.selectNodeContents(m.$('.code')); getSelection().removeAllRanges(); getSelection().addRange(r); e.target.textContent='Code sélectionné'; } };
 }
 const checkAdminPw=async pw=>Accounts.checkPw(await Accounts.refresh(),pw);
 
@@ -516,8 +535,8 @@ async function showIntern(a){
   box.innerHTML=`<section class="card"><h2>Profil</h2>
       <div class="kv"><span>Nom</span><b>${esc((a.nom||'').toUpperCase())} ${esc(a.prenom||'')}</b><span>Adresse e-mail</span><b>${esc(a.email)}</b>
         <span>Subdivision</span><b>${esc(a.profile?.subdivision||'profil non complété')}</b><span>Début d'internat</span><b>${esc(a.profile?.annee||'—')}</b>
-        <span>Compte créé le</span><b>${new Date(a.created).toLocaleDateString('fr-FR')}</b></div>
-      <div class="tools"><button class="btn" data-reset>Réinitialiser le mot de passe</button><button class="btn danger" data-delete>Supprimer le compte</button></div></section>
+        <span>Compte créé le</span><b>${new Date(a.created).toLocaleDateString('fr-FR')}</b><span>Activation</span><b>${a.pw?'compte activé':'en attente (code non encore utilisé)'}</b></div>
+      <div class="tools">${a.pw?'':'<button class="btn" data-code>Nouveau code d\'activation</button>'}<button class="btn" data-reset>Réinitialiser le mot de passe</button><button class="btn danger" data-delete>Supprimer le compte</button></div></section>
     <section class="card"><h2>Semestres</h2><div class="tscroll"><table class="htab semro"><thead><tr><th></th><th>Période</th><th>Spécialité</th><th>Terrain de stage</th></tr></thead><tbody>
       ${Array.from({length:10},(_,i)=>{ const s=sem[i]||{}; return `<tr><th scope="row">${SEM(i+1)}</th><td>${esc(s.periode||'')}</td><td>${esc(s.specialite||'')}</td><td>${esc(s.terrain||'')}</td></tr>`; }).join('')}</tbody></table></div></section>
     <section class="card"><h2>Historique des scores par dossier</h2>
@@ -526,6 +545,9 @@ async function showIntern(a){
       :'<div class="hint">Cet interne n\'a encore validé aucun dossier.</div>'}</section>`;
   box.querySelectorAll('.dsheet').forEach(el=>el.addEventListener('toggle',()=>{ if(!el.open||el.dataset.done) return; el.dataset.done=1;
     const d=ds.find(x=>x.id===el.dataset.d); DiceHistory.render(el.querySelector('.dbody'),d,byD.get(d.id).sort((x,y)=>x.date.localeCompare(y.date)),{embedded:true,who:`${a.prenom} ${(a.nom||'').toUpperCase()}`}); }));
+  const bc=box.querySelector('[data-code]');
+  if(bc) bc.onclick=async()=>{ if(!await askPassword('Nouveau code d\'activation pour '+fullName(a),checkAdminPw,'Confirmez avec votre mot de passe administrateur. L\'ancien code ne fonctionnera plus.')) return;
+    const acc=await Accounts.backend.getAccount(a.id); showCode(acc,await Accounts.newActivation(acc),'Nouveau code d\'activation'); };
   box.querySelector('[data-reset]').onclick=async()=>{
     if(!await askPassword('Réinitialiser le mot de passe de '+fullName(a),checkAdminPw,'Confirmez avec votre mot de passe administrateur.')) return;
     const m=modal(`<h2>Nouveau mot de passe pour ${esc(fullName(a))}</h2>${pwFields('r-')}<div class="pw-err" aria-live="polite"></div>
