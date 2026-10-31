@@ -40,25 +40,26 @@ function drawChart(cv,results,names,theme,W,H,hover){
   return {X,L:L+I,R,pw:pw-2*I,n};
 }
 
-function render(root,d,results){
+// opts.embedded : fiche insérée dans une autre page (suivi des internes) ; opts.who : nom de l'interne, repris dans le PDF
+function render(root,d,results,opts={}){
   const names=namesOf(results), th=document.body.classList.contains('light')?'page':'dark', ser=THEME[th].series;
-  root.innerHTML=`<div class="hist">
-    <header class="vtop"><a class="btn" href="#/">← Menu</a>
+  root.innerHTML=`<div class="hist${opts.embedded?' embedded':''}">
+    ${opts.embedded?(results.length?'<div class="tools"><button class="btn h-pdf">Exporter en PDF</button></div>':''):`<header class="vtop"><a class="btn" href="#/">← Menu</a>
       <div class="vtitle"><h1>Historique des scores Dice</h1><span class="meta">${esc(d.category)}${d.category?' · ':''}${esc(d.title)}</span></div>
-      <span class="grow"></span>${results.length?'<button class="btn primary" id="h-pdf">Exporter en PDF</button>':''}</header>
+      <span class="grow"></span>${results.length?'<button class="btn primary h-pdf">Exporter en PDF</button>':''}</header>`}
     ${results.length?`
     <section class="card"><h2>Progression du Dice</h2>
       ${results.length>1?`<div class="legend">${names.map((n,k)=>`<span><i style="--c:${ser[k%7]}"></i>${esc(n)}</span>`).join('')}<span><i class="ref"></i>Seuil 80 %</span></div>
-      <div class="chart"><canvas id="h-cv" aria-label="Courbes de progression du Dice par structure"></canvas><div class="ctip" hidden></div></div>`
+      <div class="chart"><canvas class="h-cv" aria-label="Courbes de progression du Dice par structure"></canvas><div class="ctip" hidden></div></div>`
       :'<div class="hint">La courbe de progression apparaîtra après la deuxième validation de ce dossier.</div>'}
     </section>
     <section class="card"><h2>Résultats par validation</h2><div class="tscroll"><table class="htab">
       <thead><tr><th>Validation</th>${names.map(n=>`<th>${esc(n)}</th>`).join('')}${names.length>1?'<th>Moyenne</th>':''}</tr></thead>
       <tbody>${results.map((r,i)=>`<tr><td>n° ${i+1} · ${fdt(r.date)}</td>${names.map(n=>{const v=val(r,n);return `<td class="${v!=null&&v>=.8?'good':''}">${pct(v)}</td>`;}).join('')}${names.length>1?`<td>${pct(mean(r))}</td>`:''}</tr>`).join('')}</tbody>
     </table></div><div class="hint">Index de Dice = 2 |A ∩ B| / (|A| + |B|) entre le contour de l'utilisateur et le contour de référence du fichier structure. En vert : Dice ≥ 80 %.</div></section>`
-    :`<section class="card"><div class="hint">Aucun résultat pour ce dossier dans ce navigateur. Les scores apparaissent ici après la validation d'une session de contourage.</div></section>`}
+    :`<section class="card"><div class="hint">Aucun résultat pour ce dossier. Les scores apparaissent ici après la validation d'une session de contourage.</div></section>`}
   </div>`;
-  const cv=root.querySelector('#h-cv');
+  const cv=root.querySelector('.h-cv');
   if(cv){
     const tip=root.querySelector('.ctip'); let geo=null, hover=null;
     const paint=()=>{ const W=cv.parentNode.clientWidth, H=Math.max(240,Math.min(380,W*.45)), dpr=window.devicePixelRatio||1;
@@ -72,9 +73,9 @@ function render(root,d,results){
       tip.hidden=false; const tx=geo.X(i)+12, w=tip.offsetWidth; tip.style.left=(tx+w>r.width?geo.X(i)-w-12:tx)+'px'; tip.style.top='8px'; });
     cv.addEventListener('pointerleave',()=>{hover=null; tip.hidden=true; paint();});
   }
-  const btn=root.querySelector('#h-pdf');
+  const btn=root.querySelector('.h-pdf');
   if(btn) btn.onclick=async()=>{ btn.disabled=true; const t=btn.textContent; btn.textContent='Préparation…';
-    try{ await exportPdf(d,results,names); }catch(e){ if(e&&e.code!=='declined') UI.message('Export PDF impossible',e.message||String(e)); }
+    try{ await exportPdf(d,results,names,opts.who); }catch(e){ if(e&&e.code!=='declined') UI.message('Export PDF impossible',e.message||String(e)); }
     finally{ btn.disabled=false; btn.textContent=t; } };
 }
 
@@ -82,14 +83,15 @@ let jspdfP=null;
 const loadJsPDF=()=>jspdfP||(jspdfP=new Promise((res,rej)=>{ if(window.jspdf) return res(window.jspdf);
   const s=document.createElement('script'); s.src='lib/jspdf.umd.min.js'; s.onload=()=>res(window.jspdf); s.onerror=()=>{jspdfP=null; rej(new Error('bibliothèque PDF introuvable'));}; document.head.appendChild(s); }));
 
-async function exportPdf(d,results,names){
+async function exportPdf(d,results,names,who){
   const {jsPDF}=await loadJsPDF();
   const doc=new jsPDF({unit:'mm',format:'a4'}), PW=210, M=15, CW=PW-2*M; let y=M;
   const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o);
   doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
-  txt('Plateforme d\'entraînement au contourage · Historique des scores Dice',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
+  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
   y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt(d.category||'—',M,y);
   y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); doc.splitTextToSize(d.title,CW).forEach(l=>{txt(l,M,y); y+=6;});
+  if(who){ doc.setFontSize(10); doc.setTextColor(90); txt('Interne : '+who,M,y); y+=5; doc.setTextColor(20); }
   y+=2; doc.setDrawColor(200); doc.line(M,y,PW-M,y); y+=8;
 
   // tableau
@@ -129,7 +131,7 @@ async function exportPdf(d,results,names){
   doc.setFontSize(7.5); doc.setTextColor(130);
   txt('Plateforme à but de formation : ne doit pas être utilisée pour la planification clinique.',PW/2,290,{align:'center'});
   const safe=s=>s.replace(/Œ/g,'OE').replace(/œ/g,'oe').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
-  const filename=`Dice_${safe(d.category||'dossier')}_${safe(d.title)}.pdf`;
+  const filename=`Dice_${who?safe(who)+'_':''}${safe(d.category||'dossier')}_${safe(d.title)}.pdf`;
   // dans un Artifact, le téléchargement passe par la capacité « downloads » (confirmation du lecteur)
   const dl=window.claude&&typeof claude.use==='function'?await claude.use('downloads'):null;
   if(dl) await dl.save({filename,data:doc.output('blob')}); else doc.save(filename);

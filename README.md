@@ -13,6 +13,19 @@ python3 -m http.server 8000
 # puis http://localhost:8000
 ```
 
+### Comptes et connexion
+
+Toutes les pages portent l'en-tête « Service de Radiothérapie » avec le logo des HCL. La page d'accueil permet de se connecter avec une adresse e-mail et un mot de passe. Au tout premier démarrage (aucun compte), elle propose de créer le compte administrateur principal.
+
+- **Création des comptes** : par un administrateur (bouton **Créer un compte**) : nom, prénom, adresse e-mail (identifiant) et type de compte, **Étudiant** ou **Administrateur**.
+- **Première connexion** : l'e-mail seul suffit, puis le profil s'affiche et doit être complété : subdivision (Clermont-Ferrand, Grenoble, Lyon, Saint-Etienne), année de début d'internat (de 2000 à l'année en cours, étudiants seulement) et mot de passe (au moins 12 caractères, dont un chiffre). Ces informations ne sont plus modifiables ensuite, sauf le mot de passe.
+- **Profil** (bouton en haut de page) : rappel des informations, changement du mot de passe (protégé par le mot de passe actuel) et, pour les internes, la liste de leurs semestres (10 lignes, du 1er au 10ème semestre : période, spécialité, terrain de stage).
+- **Interne** : liste des dossiers avec Histoire clinique, Contourage (mot de passe du dossier) et Historique de ses propres scores.
+- **Administrateur** : liste des dossiers avec **Statistiques** (moyenne, médiane, écart type, minimum et maximum du Dice par structure, sur la dernière validation de chaque interne), ajout et suppression de dossiers sans mot de passe supplémentaire, **Créer un compte** et **Suivi des internes**.
+- **Suivi des internes** : menu déroulant des internes par ordre alphabétique (nom, prénom, subdivision, année de début), filtrable par subdivision et par année. Pour l'interne choisi : profil, semestres en consultation, fiches d'historique des scores par dossier, groupées par localisation dans des menus repliables. Boutons **Réinitialiser le mot de passe** (après saisie du mot de passe administrateur, l'administrateur choisit le nouveau mot de passe) et **Supprimer le compte** (avertissement d'irréversibilité, mot de passe administrateur requis ; le compte et ses résultats sont supprimés).
+
+Les mots de passe sont stockés hachés (PBKDF2-SHA-256, 150 000 itérations, sel aléatoire). Les comptes et les résultats Dice sont enregistrés dans la base partagée de l'Artifact (collections `comptes` et `resultats`) ou, sur le site statique, dans le navigateur. Le stockage passe par `js/accounts.js`, qui isole ces opérations pour pouvoir brancher plus tard un serveur (Supabase, serveur des HCL). Les contours en cours restent dans le navigateur, propres à chaque compte.
+
 ### Menu principal
 
 Les dossiers sont classés par localisation tumorale (Crâne, ORL, Sein, Poumon, Œsophage, Foie, Pancréas, Rein, Col utérin, Endomètre, Vessie, Prostate, Rectum, Canal anal, Os). Chaque ligne donne accès à :
@@ -23,7 +36,7 @@ Les dossiers sont classés par localisation tumorale (Crâne, ORL, Sein, Poumon,
 
 ### Ajouter un dossier
 
-Bouton **Ajouter un dossier** en bas du menu, mot de passe de chargement `sfro`. La fenêtre demande le nom du dossier, le type tumoral, les images DICOM (fichiers ou dossier), le fichier structure (RTSTRUCT), le PDF de l'histoire clinique et le mot de passe d'ouverture du dossier. Une fois le RTSTRUCT choisi, ses structures s'affichent une par ligne avec deux cases : **Structure à charger** (cochée par défaut, sauf pour une structure sans contour) et **Structure cible**. Une case en haut de la liste coche ou décoche d'un coup toutes les structures à charger. Seules les structures à charger sont ajoutées au dossier. Une cible est toujours chargée : elle est créée vide, sous son nom du RTSTRUCT, pour être contourée, et son contour du fichier sert de référence au Dice.
+Bouton **Ajouter un dossier** (comptes administrateurs). La fenêtre demande le nom du dossier, le type tumoral, les images DICOM (fichiers ou dossier), le fichier structure (RTSTRUCT), le PDF de l'histoire clinique et le mot de passe d'ouverture du dossier. Une fois le RTSTRUCT choisi, ses structures s'affichent une par ligne avec deux cases : **Structure à charger** (cochée par défaut, sauf pour une structure sans contour) et **Structure cible**. Une case en haut de la liste coche ou décoche d'un coup toutes les structures à charger. Seules les structures à charger sont ajoutées au dossier. Une cible est toujours chargée : elle est créée vide, sous son nom du RTSTRUCT, pour être contourée, et son contour du fichier sert de référence au Dice.
 
 Le chargement est refusé, avec la liste des erreurs, si un élément manque, si les images ou le RTSTRUCT sont illisibles, si aucune structure n'est cochée comme cible, si deux cibles portent le même nom ou si le contour d'une cible ne recoupe pas les images.
 
@@ -79,6 +92,7 @@ Pour chaque dossier : tableau des Dice par validation, courbes de progression av
 | `js/viewer.js` | visionneuse, outils de contourage, validation et Dice |
 | `js/history.js` | historique, courbes, export PDF |
 | `js/store.js` | stockage local (IndexedDB) |
+| `js/accounts.js` | comptes, mots de passe, résultats par compte, session |
 | `js/shared.js` | stockage partagé de l'Artifact : base `dossiers`, assets, codage PNG 16 bits du scanner |
 | `artifact.html` | point d'entrée de la version Artifact (mêmes scripts que `index.html`) |
 | `js/app.js` | menu, chargement des dossiers, mots de passe, navigation |
@@ -88,4 +102,6 @@ Pour chaque dossier : tableau des Dice par validation, courbes de progression av
 
 ## Limites
 
-Les mots de passe sont vérifiés dans le navigateur (celui du chargement, `sfro`, figure en clair dans `js/app.js`) : ils limitent l'accès aux dossiers dans le cadre d'une formation mais ne protègent pas les fichiers publiés, qui restent téléchargeables par qui connaît leur adresse. D'où l'exigence d'anonymisation.
+Les comptes et les mots de passe (comptes et dossiers) sont vérifiés dans le navigateur : ils organisent l'accès dans le cadre d'une formation mais ne constituent pas une protection forte. Toute personne ayant accès à la base partagée peut techniquement lire les données (dont les empreintes des mots de passe) et contourner les contrôles de la page ; seul un serveur avec authentification (Supabase, serveur des HCL) les appliquerait réellement. Les fichiers publiés restent téléchargeables par qui connaît leur adresse. D'où l'exigence d'anonymisation.
+
+Dans l'Artifact claude.ai, seuls le propriétaire et les personnes invitées par e-mail comme éditeurs (lien public désactivé) peuvent écrire dans la base partagée : les internes doivent donc être invités ainsi pour enregistrer leur profil et leurs scores.

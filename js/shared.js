@@ -67,6 +67,7 @@ async function init(){
   const up=async(blob,type)=>(await assets.upload(blob,type?{type}:undefined)).id;
   const errMsg=e=>({quota_or_state:'espace de stockage de la plateforme plein',too_large:'fichier trop volumineux (20 Mio maximum)',rate_limited:'trop de requêtes, réessayer dans un instant',not_granted:'chargement réservé aux éditeurs de la plateforme'}[e&&e.code]||(e&&e.message)||'erreur inconnue');
   return {
+    db,
     canUpload:!!assets,
     errMsg,
     async list(){ const s=await col.get(); return s.docs.map(d=>({...d.data(),id:d.id,source:'shared'})); },

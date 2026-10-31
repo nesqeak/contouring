@@ -1,7 +1,6 @@
-// Menu principal, chargement des dossiers, accès par mot de passe et navigation.
+// Connexion, menu des dossiers (interne ou administrateur), chargement des dossiers et navigation.
 (function(){
 const CATEGORIES=['Crâne','ORL','Sein','Poumon','Œsophage','Foie','Pancréas','Rein','Col utérin','Endomètre','Vessie','Prostate','Rectum','Canal anal','Os'];
-const UPLOAD_PASSWORD='sfro';
 const page=document.getElementById('page'), modalRoot=document.getElementById('modal-root');
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const unlocked=new Set(); // dossiers ouverts avec le bon mot de passe pendant cette visite
@@ -14,8 +13,11 @@ document.addEventListener('click',e=>{ const a=e.target.closest&&e.target.closes
 // ARTIFACT : page servie par artifact.html, où les dossiers doivent aller au stockage partagé, jamais au navigateur.
 const ARTIFACT=!!window.PLATEFORME_PARTAGEE;
 let shared=null;
-const sharedP=Shared.init().catch(()=>null).then(s=>{ shared=s;
-  if(s) s.onChange(()=>{ if(!path&&!modalRoot.children.length) renderHome(); }); });
+const sharedP=Shared.init().catch(()=>null).then(async s=>{ shared=s;
+  if(!(ARTIFACT&&!s)){ Accounts.init(s&&s.db); await Accounts.restore().catch(()=>null); }
+  if(s) s.onChange(()=>{ if(!path&&Accounts.me&&!modalRoot.children.length) renderHome(); }); });
+const isAdmin=()=>Accounts.me&&Accounts.me.role==='admin';
+const fullName=a=>`${a.prenom||''} ${a.nom||''}`.trim();
 
 // ---- dossiers : catalogue publié (dossiers/catalogue.json) + dossiers chargés dans ce navigateur ----
 async function loadCatalogue(){
@@ -103,20 +105,35 @@ function message(title,text){
 window.UI={message};
 const checkDossierPw=d=>async pw=>(await Store.sha256(pw))===d.pwHash;
 
+// ---- en-tête commun : logo HCL, « Service de Radiothérapie », compte connecté ----
+function siteHeader(){
+  const u=Accounts.me;
+  return `<header class="sitebar"><div class="sb-in">
+    <img class="sb-logo" src="assets/logo-hcl.png" alt="Hospices Civils de Lyon">
+    <div class="sb-t"><b>Service de Radiothérapie</b><span>Plateforme d'entraînement au contourage</span></div>
+    <span class="grow"></span>
+    ${u?`<span class="sb-user">${esc(fullName(u))}<small>${u.role==='admin'?'Administrateur':'Interne'}</small></span>
+      <button class="btn" data-act="profil">Profil</button><button class="btn" data-act="logout">Déconnexion</button>`:''}
+  </div></header>`;
+}
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-act]'); if(!b) return;
+  if(b.dataset.act==='profil') profileModal();
+  else if(b.dataset.act==='logout'){ Accounts.logout(); unlocked.clear(); go('#/'); } });
+
 // ---- menu principal ----
 async function renderHome(){
-  page.innerHTML='<div class="loading">Chargement des dossiers…</div>';
-  const {list,storeOk}=await loadAll();
-  page.innerHTML=`<div class="home">
+  page.innerHTML=siteHeader()+'<div class="loading">Chargement des dossiers…</div>';
+  const {list,storeOk}=await loadAll(), admin=isAdmin();
+  page.innerHTML=siteHeader()+`<div class="home">
     <header class="brand">
-      <div class="logo"><img src="assets/logo-hcl.png" alt="Hospices Civils de Lyon" onerror="this.parentNode.hidden=true"></div>
       <div><h1>Plateforme d'entraînement au contourage</h1><div class="sub">Dossiers cliniques classés par localisation tumorale</div></div>
+      ${admin?`<div class="admbar"><button class="btn primary" data-a="add">Ajouter un dossier</button><button class="btn" data-a="account">Créer un compte</button><a class="btn" href="#/suivi">Suivi des internes</a></div>`:''}
     </header>
     ${ARTIFACT&&!shared?'<div class="errors"><b>Stockage partagé indisponible dans cette vue.</b> Ouvrez la plateforme depuis son lien claude.ai, en étant connecté à votre compte (pas dans un onglet séparé ni depuis un fichier enregistré). L\'ajout de dossiers est désactivé ici pour qu\'aucun dossier ne reste enfermé dans ce navigateur.</div>':''}
     ${storeOk?'':'<div class="errors">Ce navigateur bloque le stockage local : les dossiers chargés, les contours en cours et l\'historique des scores ne peuvent pas être enregistrés.</div>'}
     <div id="cats" style="display:grid;gap:18px"></div>
-    <div class="add"><button class="btn primary" id="add">Ajouter un dossier</button></div>
-    <div class="hint" style="text-align:center;margin-top:-12px">${shared?'Stockage partagé : les dossiers ajoutés sont visibles par toutes les personnes ayant accès à la plateforme.':ARTIFACT?'':'Version locale : les dossiers ajoutés restent dans ce navigateur.'}</div>
+    ${admin?`<div class="add"><button class="btn primary" id="add">Ajouter un dossier</button></div>
+    <div class="hint" style="text-align:center;margin-top:-12px">${shared?'Stockage partagé : les dossiers ajoutés sont visibles par toutes les personnes ayant accès à la plateforme.':'Version locale : les dossiers et les comptes restent dans ce navigateur.'}</div>`:''}
     <footer class="disclaimer"><b>Avertissement :</b> cette plateforme est destinée exclusivement à la formation. Elle ne doit pas être utilisée pour la planification clinique des traitements.</footer>
   </div>`;
   const cats=page.querySelector('#cats');
@@ -129,20 +146,19 @@ async function renderHome(){
       const row=document.createElement('div'); row.className='drow';
       const onlyHere=shared&&d.source==='local';
       row.innerHTML=`<div class="t">${esc(d.title)}${onlyHere?' <span class="tag">dans ce navigateur uniquement</span>':''}<small>${d.targets.length} structure${d.targets.length>1?'s':''} à contourer : ${esc(d.targets.join(', '))}</small></div>
-        <div class="acts">${onlyHere&&shared.canUpload?'<button class="btn" data-share title="Envoyer ce dossier vers le stockage partagé">Mettre en partage</button>':''}<button class="btn" data-pdf>Histoire clinique</button>
+        <div class="acts">${admin&&onlyHere&&shared.canUpload?'<button class="btn" data-share title="Envoyer ce dossier vers le stockage partagé">Mettre en partage</button>':''}<button class="btn" data-pdf>Histoire clinique</button>
         <button class="btn primary" data-open>Contourage</button>
-        <a class="btn" href="#/historique/${encodeURIComponent(d.id)}">Historique</a>
-        ${d.source==='local'||(d.source==='shared'&&shared.canUpload)?'<button class="btn danger" data-del title="Supprimer ce dossier">Supprimer</button>':''}</div>`;
+        ${admin?`<a class="btn" href="#/stats/${encodeURIComponent(d.id)}">Statistiques</a>`:`<a class="btn" href="#/historique/${encodeURIComponent(d.id)}">Historique</a>`}
+        ${admin&&(d.source==='local'||(d.source==='shared'&&shared.canUpload))?'<button class="btn danger" data-del title="Supprimer ce dossier">Supprimer</button>':''}</div>`;
       const a=row.querySelector('[data-pdf]');
       if(d.source==='shared'?!d.pdf:d.source==='catalogue'?!d.pdf:false) a.hidden=true;
       a.onclick=()=>openPdf(d,a);
       row.querySelector('[data-open]').onclick=async()=>{
-        if(await askPassword('Ouvrir « '+d.title+' »',checkDossierPw(d))){ unlocked.add(d.id); go('#/contourage/'+encodeURIComponent(d.id)); } };
+        if(admin||await askPassword('Ouvrir « '+d.title+' »',checkDossierPw(d))){ unlocked.add(d.id); go('#/contourage/'+encodeURIComponent(d.id)); } };
       const sh=row.querySelector('[data-share]');
       if(sh) sh.onclick=()=>shareLocal(d,sh);
       const del=row.querySelector('[data-del]');
       if(del) del.onclick=async()=>{
-        if(!await askPassword('Supprimer « '+d.title+' »',async pw=>pw===UPLOAD_PASSWORD,'Mot de passe de chargement requis. L\'historique des scores est conservé.')) return;
         if(!await confirmBox('Supprimer définitivement le dossier « '+d.title+' »'+(d.source==='shared'?' pour tous les utilisateurs ?':' de ce navigateur ?'))) return;
         try{ if(d.source==='shared') await shared.remove(d); else await Store.removeDossier(d.id); }
         catch(e){ await message('Suppression impossible',(shared?shared.errMsg(e):e.message)); }
@@ -151,15 +167,15 @@ async function renderHome(){
     }
     cats.appendChild(sec);
   }
-  if(ARTIFACT&&!shared) page.querySelector('#add').disabled=true;
-  if(shared&&!shared.canUpload){ const b=page.querySelector('#add'); b.disabled=true; b.title='Ajout réservé aux éditeurs de la plateforme';
-    b.insertAdjacentHTML('afterend','<div class="hint" style="margin-left:10px;align-self:center">Ajout réservé aux éditeurs de la plateforme.</div>'); }
-  page.querySelector('#add').onclick=async()=>{ if(await askPassword('Ajouter un dossier',async pw=>pw===UPLOAD_PASSWORD,'Mot de passe de chargement requis.')) uploadForm(); };
+  if(!admin) return;
+  const adds=page.querySelectorAll('#add,[data-a="add"]');
+  if(shared&&!shared.canUpload) adds.forEach(b=>{ b.disabled=true; b.title='Ajout réservé aux éditeurs de l\'Artifact (menu Partager de claude.ai)'; });
+  adds.forEach(b=>b.onclick=uploadForm);
+  page.querySelector('[data-a="account"]').onclick=createAccountModal;
 }
 
 // dossier enregistré dans ce navigateur -> stockage partagé (même identifiant : historique et contours en cours suivent)
 async function shareLocal(d,btn){
-  if(!await askPassword('Mettre en partage « '+d.title+' »',async pw=>pw===UPLOAD_PASSWORD,'Mot de passe de chargement requis.')) return;
   btn.disabled=true; const t=btn.textContent;
   try{
     btn.textContent='Lecture…';
@@ -301,27 +317,234 @@ function uploadForm(){
 // ---- contourage ----
 async function renderViewer(id){
   const d=await findDossier(id);
-  if(!d){ page.innerHTML='<div class="loading error">Dossier introuvable. <a href="#/">Retour au menu</a></div>'; return; }
-  if(!unlocked.has(id)){
+  if(!d){ page.innerHTML=siteHeader()+'<div class="loading error">Dossier introuvable. <a href="#/">Retour au menu</a></div>'; return; }
+  if(!unlocked.has(id)&&!isAdmin()){
     page.innerHTML='';
     if(!await askPassword('Ouvrir « '+d.title+' »',checkDossierPw(d))){ go('#/'); return; }
     unlocked.add(id);
   }
-  page.innerHTML='<div class="loading"><div id="lmsg">Chargement des images…</div><div class="bar"><i></i></div></div>';
+  page.innerHTML=siteHeader()+'<div class="loading"><div id="lmsg">Chargement des images…</div><div class="bar"><i></i></div></div>';
   const bar=page.querySelector('.bar i'), msg=page.querySelector('#lmsg');
   try{
     const {V,rois,fusions}=await loadCase(d,p=>bar.style.width=(p*90).toFixed(0)+'%',t=>msg.textContent=t);
-    const draft=await Store.getDraft(d.id).catch(()=>null);
+    const me=Accounts.me, dkey=me.id+':'+d.id; // contours en cours propres à chaque compte
+    const draft=await Store.getDraft(dkey).catch(()=>null);
     if(path!=='contourage/'+encodeURIComponent(id)) return; // l'utilisateur est parti entre-temps
-    page.innerHTML='';
+    page.innerHTML=siteHeader()+'<div id="vroot"></div>';
     // seules les structures choisies au chargement (toutes pour un dossier sans liste) ; les cibles en font partie
     const keep=d.structures&&new Set([...d.structures,...d.targets].map(DICOM.normName));
-    current=Viewer.open(page,{dossier:d,V,fusions:fusions||[],rois:keep?rois.filter(r=>keep.has(DICOM.normName(r.name))):rois,draft,openPdf:btn=>openPdf(d,btn),
-      saveDraft:v=>Store.putDraft(d.id,v),
+    current=Viewer.open(page.querySelector('#vroot'),{dossier:d,V,fusions:fusions||[],rois:keep?rois.filter(r=>keep.has(DICOM.normName(r.name))):rois,draft,openPdf:btn=>openPdf(d,btn),
+      saveDraft:v=>Store.putDraft(dkey,v),
       confirm:confirmBox,
-      onValidated:async scores=>{ await Store.addResult(d.id,{date:new Date().toISOString(),scores:scores.map(s=>({name:s.name,dice:s.dice,volUser:s.volUser,volRef:s.volRef}))});
-        await Store.delDraft(d.id); }});
-  }catch(e){ page.innerHTML=`<div class="loading error">Le dossier n'a pas pu être ouvert : ${esc(e.message)}. <a href="#/">Retour au menu</a></div>`; }
+      onValidated:async scores=>{ await Accounts.addResult({account:me.id,role:me.role,dossier:d.id,title:d.title,category:d.category,date:new Date().toISOString(),
+          scores:scores.map(s=>({name:s.name,dice:s.dice,volUser:s.volUser,volRef:s.volRef}))});
+        await Store.delDraft(dkey); }});
+  }catch(e){ page.innerHTML=siteHeader()+`<div class="loading error">Le dossier n'a pas pu être ouvert : ${esc(e.message)}. <a href="#/">Retour au menu</a></div>`; }
+}
+
+// ---- connexion ----
+function renderNoStorage(){
+  page.innerHTML=siteHeader()+`<div class="login"><h1>Plateforme d'entraînement au contourage</h1>
+    <div class="errors"><b>Stockage partagé indisponible dans cette vue.</b> Ouvrez la plateforme depuis son lien claude.ai, en étant connecté à votre compte claude.ai (pas dans un onglet séparé ni depuis un fichier enregistré).</div></div>`;
+}
+async function renderLogin(){
+  page.innerHTML=siteHeader()+'<div class="loading">Chargement…</div>';
+  let accounts=[], err=null;
+  try{ accounts=await Accounts.listAccounts(); }catch(e){ err=e; }
+  const first=!err&&!accounts.length;
+  page.innerHTML=siteHeader()+`<div class="login">
+    <h1>Plateforme d'entraînement au contourage</h1>
+    <p class="sub">Entraînement au contourage des volumes cibles sur des dossiers cliniques anonymisés, avec calcul du Dice par rapport au contour de référence.</p>
+    ${err?`<div class="errors">Les comptes ne peuvent pas être lus : ${esc(err.message||String(err))}</div>`:first?`
+    <form class="card lform" id="boot"><h2>Premier démarrage</h2>
+      <div class="hint">Aucun compte n'existe encore. Créez le compte administrateur principal ; vous choisirez ensuite votre mot de passe.</div>
+      <div class="field"><label for="b-nom">Nom</label><input type="text" id="b-nom" autocomplete="family-name"></div>
+      <div class="field"><label for="b-prenom">Prénom</label><input type="text" id="b-prenom" autocomplete="given-name"></div>
+      <div class="field"><label for="b-mail">Adresse e-mail</label><input type="email" id="b-mail" autocomplete="email"></div>
+      <div class="pw-err" aria-live="polite"></div>
+      <button class="btn primary">Créer le compte administrateur</button></form>`:`
+    <form class="card lform" id="login"><h2>Connexion</h2>
+      <div class="field"><label for="l-mail">Adresse e-mail</label><input type="email" id="l-mail" autocomplete="username"></div>
+      <div class="field"><label for="l-pw">Mot de passe</label><input type="password" id="l-pw" autocomplete="current-password"></div>
+      <div class="hint">Première connexion : saisissez seulement votre adresse e-mail, vous choisirez ensuite votre mot de passe.</div>
+      <div class="pw-err" aria-live="polite"></div>
+      <button class="btn primary">Se connecter</button></form>`}
+    <footer class="disclaimer"><b>Avertissement :</b> cette plateforme est destinée exclusivement à la formation. Elle ne doit pas être utilisée pour la planification clinique des traitements.</footer>
+  </div>`;
+  const f=page.querySelector('form'); if(!f) return;
+  const errEl=f.querySelector('.pw-err'), btn=f.querySelector('button');
+  f.querySelector('input').focus();
+  f.onsubmit=async e=>{ e.preventDefault(); errEl.textContent=''; btn.disabled=true;
+    try{
+      if(first){ const nom=f.querySelector('#b-nom').value.trim(), prenom=f.querySelector('#b-prenom').value.trim(), email=f.querySelector('#b-mail').value.trim();
+        if(!nom||!prenom||!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Renseignez le nom, le prénom et une adresse e-mail valide.');
+        await Accounts.login(await Accounts.create({nom,prenom,email,role:'admin'})); return route(); }
+      const acc=await Accounts.findByEmail(f.querySelector('#l-mail').value);
+      if(!acc) throw new Error('Aucun compte ne correspond à cette adresse e-mail.');
+      if(acc.pw&&!await Accounts.checkPw(acc,f.querySelector('#l-pw').value)) throw new Error('Mot de passe incorrect.');
+      await Accounts.login(acc); route();
+    }catch(e){ errEl.textContent=e.message; btn.disabled=false; } };
+}
+
+// ---- profil ----
+const yearOpts=sel=>Accounts.years().map(y=>`<option${y===sel?' selected':''}>${y}</option>`).join('');
+const subOpts=sel=>Accounts.SUBDIVISIONS.map(s=>`<option${s===sel?' selected':''}>${esc(s)}</option>`).join('');
+const pwFields=(p='')=>`<div class="field"><label for="${p}pw1">Mot de passe</label><input type="password" id="${p}pw1" autocomplete="new-password"></div>
+  <div class="field"><label for="${p}pw2">Confirmation du mot de passe</label><input type="password" id="${p}pw2" autocomplete="new-password"></div>
+  <div class="hint">Au moins 12 caractères, dont au moins un chiffre.</div>`;
+const readPw=(m,p='')=>{ const a=m.$('#'+p+'pw1').value, b=m.$('#'+p+'pw2').value; const pb=Accounts.pwProblem(a); if(pb) throw new Error(pb); if(a!==b) throw new Error('Les deux mots de passe ne sont pas identiques.'); return a; };
+// première ouverture du compte : profil à compléter, impossible à fermer sans le valider
+function profileSetup(){
+  const u=Accounts.me, st=u.role!=='admin';
+  return new Promise(res=>{
+    const m=modal(`<h2>Compléter votre profil</h2>
+      <div class="kv"><span>Nom</span><b>${esc(fullName(u))}</b><span>Adresse e-mail</span><b>${esc(u.email)}</b></div>
+      <div class="field"><label for="p-sub">Subdivision</label><select id="p-sub"><option value="">— Choisir —</option>${subOpts()}</select></div>
+      ${st?`<div class="field"><label for="p-year">Année de début d'internat</label><select id="p-year"><option value="">— Choisir —</option>${yearOpts()}</select></div>`:''}
+      ${pwFields()}
+      <div class="notice">Une fois validées, ces informations ne pourront plus être modifiées, en dehors du mot de passe.</div>
+      <div class="pw-err" aria-live="polite"></div>
+      <div class="actions"><button class="btn" data-x>Se déconnecter</button><button class="btn primary" data-ok>Valider mon profil</button></div>`);
+    m.$('[data-x]').onclick=()=>{ m.close(); Accounts.logout(); go('#/'); };
+    m.$('[data-ok]').onclick=async()=>{ const err=m.$('.pw-err'); err.textContent='';
+      try{ const sub=m.$('#p-sub').value, year=st?+m.$('#p-year').value:null;
+        if(!sub) throw new Error('Choisissez votre subdivision.'); if(st&&!year) throw new Error('Choisissez votre année de début d\'internat.');
+        const pw=readPw(m), a=await Accounts.refresh();
+        a.profile=st?{subdivision:sub,annee:year}:{subdivision:sub}; a.profileDone=true; a.pw=await Accounts.hashPw(pw); if(st&&!a.semestres) a.semestres=[];
+        await Accounts.save(a); m.close(); res(); }
+      catch(e){ err.textContent=e.message; } };
+    m.$('#p-sub').focus();
+  });
+}
+const SEM=k=>k===1?'1er semestre':`${k}ème semestre`;
+async function profileModal(){
+  const u=await Accounts.refresh(), st=u.role!=='admin', sem=u.semestres||[];
+  const m=modal(`<h2>Profil</h2>
+    <div class="kv"><span>Nom</span><b>${esc(fullName(u))}</b><span>Adresse e-mail</span><b>${esc(u.email)}</b>
+      <span>Compte</span><b>${st?'Interne':'Administrateur'}</b><span>Subdivision</span><b>${esc(u.profile?.subdivision||'—')}</b>
+      ${st?`<span>Début d'internat</span><b>${esc(u.profile?.annee||'—')}</b>`:''}</div>
+    ${st?`<div class="field"><span class="lab">Mes semestres</span><div class="tscroll"><table class="semtab"><thead><tr><th></th><th>Période</th><th>Spécialité</th><th>Terrain de stage</th></tr></thead><tbody>
+      ${Array.from({length:10},(_,i)=>{ const s=sem[i]||{}; return `<tr><th scope="row">${SEM(i+1)}</th>${['periode','specialite','terrain'].map(f=>`<td><input type="text" data-s="${i}" data-f="${f}" value="${esc(s[f]||'')}" aria-label="${SEM(i+1)} : ${f==='periode'?'période':f==='specialite'?'spécialité':'terrain de stage'}"></td>`).join('')}</tr>`; }).join('')}
+      </tbody></table></div><div><button class="btn" data-sem>Enregistrer les semestres</button> <span class="hint" data-semok></span></div></div>`:''}
+    <details class="pwchange"><summary>Changer le mot de passe</summary>
+      <div class="field"><label for="c-old">Mot de passe actuel</label><input type="password" id="c-old" autocomplete="current-password"></div>
+      ${pwFields('c-')}<div class="pw-err" aria-live="polite"></div><div><button class="btn primary" data-pw>Changer le mot de passe</button></div></details>
+    <div class="actions"><button class="btn" data-x>Fermer</button></div>`,{wide:st});
+  m.$('[data-x]').onclick=m.close;
+  if(st) m.$('[data-sem]').onclick=async()=>{ const a=await Accounts.refresh(), out=Array.from({length:10},()=>({periode:'',specialite:'',terrain:''}));
+    m.box.querySelectorAll('[data-s]').forEach(i=>{ out[+i.dataset.s][i.dataset.f]=i.value.trim(); });
+    a.semestres=out; await Accounts.save(a); m.$('[data-semok]').textContent='Semestres enregistrés.'; };
+  m.$('[data-pw]').onclick=async()=>{ const err=m.$('.pwchange .pw-err'); err.textContent='';
+    try{ const a=await Accounts.refresh();
+      if(!await Accounts.checkPw(a,m.$('#c-old').value)) throw new Error('Mot de passe actuel incorrect.');
+      await Accounts.setPassword(a,readPw(m,'c-')); m.close(); await message('Mot de passe changé','Votre nouveau mot de passe est enregistré.'); }
+    catch(e){ err.textContent=e.message; } };
+}
+
+// ---- création de compte (administrateur) ----
+function createAccountModal(){
+  const m=modal(`<h2>Créer un compte</h2>
+    <div class="field"><label for="a-nom">Nom</label><input type="text" id="a-nom"></div>
+    <div class="field"><label for="a-prenom">Prénom</label><input type="text" id="a-prenom"></div>
+    <div class="field"><label for="a-mail">Adresse e-mail (identifiant du compte)</label><input type="email" id="a-mail"></div>
+    <fieldset class="roles"><legend>Type de compte</legend>
+      <label><input type="radio" name="a-role" value="etudiant" checked> Étudiant</label>
+      <label><input type="radio" name="a-role" value="admin"> Administrateur</label></fieldset>
+    <div class="pw-err" aria-live="polite"></div>
+    <div class="actions"><button class="btn" data-x>Annuler</button><button class="btn primary" data-ok>Créer le compte</button></div>`);
+  m.$('[data-x]').onclick=m.close; m.$('#a-nom').focus();
+  m.$('[data-ok]').onclick=async()=>{ const err=m.$('.pw-err'); err.textContent='';
+    try{ const nom=m.$('#a-nom').value.trim(), prenom=m.$('#a-prenom').value.trim(), email=m.$('#a-mail').value.trim(), role=m.box.querySelector('[name=a-role]:checked').value;
+      if(!nom||!prenom) throw new Error('Renseignez le nom et le prénom.'); if(!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Adresse e-mail invalide.');
+      const a=await Accounts.create({nom,prenom,email,role}); m.close();
+      await message('Compte créé',`${fullName(a)} (${role==='admin'?'administrateur':'étudiant'}) pourra se connecter avec l'adresse ${a.email} : à la première connexion, l'e-mail suffit, puis il complète son profil et choisit son mot de passe.`); }
+    catch(e){ err.textContent=e.message.charAt(0).toUpperCase()+e.message.slice(1)+'.'; } };
+}
+const checkAdminPw=async pw=>Accounts.checkPw(await Accounts.refresh(),pw);
+
+// ---- statistiques d'un dossier (administrateur) ----
+const pct=v=>v==null||isNaN(v)?'—':(v*100).toFixed(1).replace('.',',')+' %';
+function stats(vals){ const n=vals.length; if(!n) return {n}; const s=[...vals].sort((a,b)=>a-b), mean=s.reduce((a,b)=>a+b,0)/n;
+  const med=n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2, sd=n>1?Math.sqrt(s.reduce((a,v)=>a+(v-mean)**2,0)/(n-1)):null; return {n,mean,med,sd,min:s[0],max:s[n-1]}; }
+async function renderStats(id){
+  page.innerHTML=siteHeader()+'<div class="loading">Calcul des statistiques…</div>';
+  const d=await findDossier(id), all=(await Accounts.results({dossier:id})).filter(r=>r.role==='etudiant');
+  // une valeur par interne : sa dernière validation du dossier
+  const last=new Map(); for(const r of all) last.set(r.account,r);
+  const rs=[...last.values()], names=[]; rs.forEach(r=>r.scores.forEach(s=>{ if(!names.includes(s.name)) names.push(s.name); }));
+  if(d) d.targets.forEach(t=>{ if(!names.includes(t)) names.push(t); });
+  const rows=names.map(n=>({name:n,...stats(rs.map(r=>r.scores.find(s=>s.name===n)?.dice).filter(v=>v!=null))}));
+  page.innerHTML=siteHeader()+`<div class="hist">
+    <header class="vtop"><a class="btn" href="#/">← Menu</a>
+      <div class="vtitle"><h1>Statistiques du Dice</h1><span class="meta">${esc(d?.category||'')}${d?' · ':''}${esc(d?.title||'Dossier supprimé')}</span></div></header>
+    <section class="card"><h2>Par structure</h2>
+      <div class="hint">${rs.length} interne${rs.length>1?'s':''} ${rs.length>1?'ont':'a'} validé ce dossier (${all.length} validation${all.length>1?'s':''} au total). Pour chaque interne, seule sa dernière validation est comptée.</div>
+      ${rs.length?`<div class="tscroll"><table class="htab"><thead><tr><th>Structure</th><th>Internes</th><th>Moyenne</th><th>Médiane</th><th>Écart type</th><th>Minimum</th><th>Maximum</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.n}</td><td class="${r.mean>=.8?'good':''}">${pct(r.mean)}</td><td>${pct(r.med)}</td><td>${r.sd==null?'—':pct(r.sd)}</td><td>${pct(r.min)}</td><td>${pct(r.max)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="hint">Écart type calculé sur l'échantillon (n − 1) ; il faut au moins deux internes. En vert : moyenne ≥ 80 %.</div>`:'<div class="hint">Aucun interne n\'a encore validé ce dossier.</div>'}
+    </section></div>`;
+}
+
+// ---- suivi des internes (administrateur) ----
+async function renderSuivi(sel){
+  page.innerHTML=siteHeader()+'<div class="loading">Chargement des comptes…</div>';
+  const st=(await Accounts.listAccounts()).filter(a=>a.role==='etudiant').sort(Accounts.byName);
+  const yrs=[...new Set(st.map(a=>a.profile?.annee).filter(Boolean))].sort((a,b)=>b-a);
+  page.innerHTML=siteHeader()+`<div class="hist">
+    <header class="vtop"><a class="btn" href="#/">← Menu</a><div class="vtitle"><h1>Suivi des internes</h1><span class="meta">${st.length} compte${st.length>1?'s':''} interne${st.length>1?'s':''}</span></div></header>
+    <section class="card filters">
+      <div class="field"><label for="s-sub">Subdivision</label><select id="s-sub"><option value="">Toutes</option>${subOpts()}</select></div>
+      <div class="field"><label for="s-year">Année de début d'internat</label><select id="s-year"><option value="">Toutes</option>${yrs.map(y=>`<option>${y}</option>`).join('')}</select></div>
+      <div class="field wide"><label for="s-who">Interne</label><select id="s-who"></select></div>
+    </section>
+    <div id="s-detail"></div></div>`;
+  const who=page.querySelector('#s-who'), fs=page.querySelector('#s-sub'), fy=page.querySelector('#s-year');
+  const fill=()=>{ const l=st.filter(a=>(!fs.value||a.profile?.subdivision===fs.value)&&(!fy.value||String(a.profile?.annee)===fy.value)), cur=who.value;
+    who.innerHTML=`<option value="">— ${l.length} interne${l.length>1?'s':''} —</option>`+l.map(a=>`<option value="${a.id}">${esc((a.nom||'').toUpperCase())} ${esc(a.prenom||'')} — ${esc(a.profile?.subdivision||'profil non complété')}${a.profile?.annee?' — '+a.profile.annee:''}</option>`).join('');
+    if(l.some(a=>a.id===cur)) who.value=cur; };
+  fs.onchange=fy.onchange=()=>{ fill(); showIntern(st.find(a=>a.id===who.value)); };
+  who.onchange=()=>showIntern(st.find(a=>a.id===who.value));
+  fill(); if(sel&&st.some(a=>a.id===sel)){ who.value=sel; showIntern(st.find(a=>a.id===sel)); }
+}
+async function showIntern(a){
+  const box=page.querySelector('#s-detail'); if(!a){ box.innerHTML=''; return; }
+  box.innerHTML='<div class="loading">Chargement…</div>';
+  const [res,{list}]=await Promise.all([Accounts.results({account:a.id}),loadAll()]);
+  const sem=a.semestres||[], byD=new Map(); res.forEach(r=>{ if(!byD.has(r.dossier)) byD.set(r.dossier,[]); byD.get(r.dossier).push(r); });
+  const ds=[...byD.keys()].map(id=>{ const d=list.find(x=>x.id===id), r=byD.get(id)[0]; return d||{id,title:(r.title||'Dossier')+' (supprimé)',category:r.category||'Autre',targets:[]}; });
+  const cats=[...CATEGORIES,...new Set(ds.map(d=>d.category).filter(c=>!CATEGORIES.includes(c)))].filter(c=>ds.some(d=>d.category===c));
+  box.innerHTML=`<section class="card"><h2>Profil</h2>
+      <div class="kv"><span>Nom</span><b>${esc((a.nom||'').toUpperCase())} ${esc(a.prenom||'')}</b><span>Adresse e-mail</span><b>${esc(a.email)}</b>
+        <span>Subdivision</span><b>${esc(a.profile?.subdivision||'profil non complété')}</b><span>Début d'internat</span><b>${esc(a.profile?.annee||'—')}</b>
+        <span>Compte créé le</span><b>${new Date(a.created).toLocaleDateString('fr-FR')}</b></div>
+      <div class="tools"><button class="btn" data-reset>Réinitialiser le mot de passe</button><button class="btn danger" data-delete>Supprimer le compte</button></div></section>
+    <section class="card"><h2>Semestres</h2><div class="tscroll"><table class="htab semro"><thead><tr><th></th><th>Période</th><th>Spécialité</th><th>Terrain de stage</th></tr></thead><tbody>
+      ${Array.from({length:10},(_,i)=>{ const s=sem[i]||{}; return `<tr><th scope="row">${SEM(i+1)}</th><td>${esc(s.periode||'')}</td><td>${esc(s.specialite||'')}</td><td>${esc(s.terrain||'')}</td></tr>`; }).join('')}</tbody></table></div></section>
+    <section class="card"><h2>Historique des scores par dossier</h2>
+      ${cats.length?cats.map(c=>{ const l=ds.filter(d=>d.category===c).sort((x,y)=>x.title.localeCompare(y.title,'fr'));
+        return `<details class="cgroup"><summary>${esc(c)} <span class="n">${l.length} dossier${l.length>1?'s':''}</span></summary>${l.map(d=>`<details class="dsheet" data-d="${esc(d.id)}"><summary>${esc(d.title)} <span class="n">${byD.get(d.id).length} validation${byD.get(d.id).length>1?'s':''}</span></summary><div class="dbody"></div></details>`).join('')}</details>`; }).join('')
+      :'<div class="hint">Cet interne n\'a encore validé aucun dossier.</div>'}</section>`;
+  box.querySelectorAll('.dsheet').forEach(el=>el.addEventListener('toggle',()=>{ if(!el.open||el.dataset.done) return; el.dataset.done=1;
+    const d=ds.find(x=>x.id===el.dataset.d); DiceHistory.render(el.querySelector('.dbody'),d,byD.get(d.id).sort((x,y)=>x.date.localeCompare(y.date)),{embedded:true,who:`${a.prenom} ${(a.nom||'').toUpperCase()}`}); }));
+  box.querySelector('[data-reset]').onclick=async()=>{
+    if(!await askPassword('Réinitialiser le mot de passe de '+fullName(a),checkAdminPw,'Confirmez avec votre mot de passe administrateur.')) return;
+    const m=modal(`<h2>Nouveau mot de passe pour ${esc(fullName(a))}</h2>${pwFields('r-')}<div class="pw-err" aria-live="polite"></div>
+      <div class="actions"><button class="btn" data-x>Annuler</button><button class="btn primary" data-ok>Enregistrer</button></div>`);
+    m.$('[data-x]').onclick=m.close; m.$('#r-pw1').focus();
+    m.$('[data-ok]').onclick=async()=>{ try{ const acc=await Accounts.backend.getAccount(a.id); await Accounts.setPassword(acc,readPw(m,'r-')); m.close();
+        await message('Mot de passe réinitialisé',`Communiquez le nouveau mot de passe à ${fullName(a)} ; il pourra le changer depuis son profil.`); }
+      catch(e){ m.$('.pw-err').textContent=e.message; } }; };
+  box.querySelector('[data-delete]').onclick=()=>{
+    const m=modal(`<h2>Supprimer le compte de ${esc(fullName(a))}</h2>
+      <div class="errors"><b>Attention, cette action est irréversible, toutes les données liées au compte sont perdues.</b></div>
+      <div class="field"><label for="d-pw">Votre mot de passe administrateur</label><input type="password" id="d-pw" autocomplete="current-password"></div>
+      <div class="pw-err" aria-live="polite"></div>
+      <div class="actions"><button class="btn" data-x>Annuler</button><button class="btn danger" data-ok>Supprimer définitivement</button></div>`);
+    m.$('[data-x]').onclick=m.close; m.$('#d-pw').focus();
+    m.$('[data-ok]').onclick=async()=>{ const err=m.$('.pw-err'); err.textContent='';
+      if(!await checkAdminPw(m.$('#d-pw').value)){ err.textContent='Mot de passe incorrect.'; return; }
+      try{ await Accounts.remove(a); m.close(); await message('Compte supprimé',`Le compte de ${fullName(a)} et ses résultats ont été supprimés.`); renderSuivi(); }
+      catch(e){ err.textContent='Suppression impossible : '+e.message; } }; };
 }
 
 // ---- navigation ----
@@ -330,12 +553,20 @@ async function route(){
   if(current){ current.destroy(); current=null; }
   modalRoot.innerHTML='';
   const [r,arg]=path.split('/');
-  document.body.classList.toggle('light',r!=='contourage'); // accueil et historique sur fond blanc, visionneuse en console sombre
+  document.body.classList.toggle('light',r!=='contourage'); // pages sur fond blanc, visionneuse en console sombre
   const id=arg&&decodeURIComponent(arg);
   window.scrollTo(0,0);
+  if(ARTIFACT&&!shared) return renderNoStorage();
+  const me=Accounts.me;
+  if(!me) return renderLogin();
+  if(!me.profileDone){ page.innerHTML=siteHeader(); await profileSetup(); }
   if(r==='contourage'&&id) return renderViewer(id);
-  if(r==='historique'&&id){ const d=await findDossier(id); const res=await Store.getResults(id).catch(()=>[]);
-    return DiceHistory.render(page,d||{id,title:'Dossier supprimé',category:'',targets:[]},res); }
+  if(r==='historique'&&id){ const d=await findDossier(id); const res=await Accounts.results({account:me.id,dossier:id}).catch(()=>[]);
+    page.innerHTML=siteHeader()+'<div id="hroot"></div>';
+    return DiceHistory.render(page.querySelector('#hroot'),d||{id,title:'Dossier supprimé',category:'',targets:[]},res); }
+  if(r==='stats'&&id&&isAdmin()) return renderStats(id);
+  if(r==='suivi'&&isAdmin()) return renderSuivi();
+  if(r) { path=''; try{ history.replaceState(null,'','#/'); }catch(e){} }
   return renderHome();
 }
 window.addEventListener('hashchange',()=>{ const h=location.hash.replace(/^#\/?/,''); if(h!==path){ path=h; route(); } });

@@ -1,13 +1,13 @@
 // Stockage local (IndexedDB) : dossiers chargés depuis ce navigateur, fichiers, contours en cours, résultats Dice.
 // Les dossiers publiés pour tous sont décrits dans dossiers/catalogue.json (voir README).
 (function(){
-const DB_NAME='plateforme-contourage', STORES=['dossiers','files','drafts','results'];
+const DB_NAME='plateforme-contourage', STORES=['dossiers','files','drafts','results','comptes','resultats'];
 let dbp=null;
 function open(){
   if(dbp) return dbp;
   dbp=new Promise((res,rej)=>{
     if(!window.indexedDB) return rej(new Error('stockage local indisponible dans ce navigateur'));
-    const rq=indexedDB.open(DB_NAME,1);
+    const rq=indexedDB.open(DB_NAME,2); // v2 : comptes et résultats par compte (version statique)
     rq.onupgradeneeded=()=>{ const db=rq.result; for(const s of STORES) if(!db.objectStoreNames.contains(s)) db.createObjectStore(s); };
     rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error||new Error('stockage local indisponible'));
   });
@@ -44,5 +44,6 @@ window.Store={
   async getResults(id){ return (await get('results',id))||[]; },
   async addResult(id,r){ const l=(await get('results',id))||[]; l.push(r); await put('results',id,l); return l; },
   sha256,
+  kv:{get,put:(st,k,v)=>put(st,k,v),del,all},
 };
 })();
