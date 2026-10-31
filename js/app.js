@@ -486,13 +486,20 @@ async function renderStats(id){
   const rows=names.map(n=>({name:n,...stats(rs.map(r=>r.scores.find(s=>s.name===n)?.dice).filter(v=>v!=null))}));
   page.innerHTML=siteHeader()+`<div class="hist">
     <header class="vtop"><a class="btn" href="#/">← Menu</a>
-      <div class="vtitle"><h1>Statistiques du Dice</h1><span class="meta">${esc(d?.category||'')}${d?' · ':''}${esc(d?.title||'Dossier supprimé')}</span></div></header>
+      <div class="vtitle"><h1>Statistiques du Dice</h1><span class="meta">${esc(d?.category||'')}${d?' · ':''}${esc(d?.title||'Dossier supprimé')}</span></div>
+      <span class="grow"></span>${rs.length?'<button class="btn primary" id="st-pdf">Exporter en PDF</button>':''}</header>
     <section class="card"><h2>Par structure</h2>
       <div class="hint">${rs.length} interne${rs.length>1?'s':''} ${rs.length>1?'ont':'a'} validé ce dossier (${all.length} validation${all.length>1?'s':''} au total). Pour chaque interne, seule sa dernière validation est comptée.</div>
       ${rs.length?`<div class="tscroll"><table class="htab"><thead><tr><th>Structure</th><th>Internes</th><th>Moyenne</th><th>Médiane</th><th>Écart type</th><th>Minimum</th><th>Maximum</th></tr></thead>
       <tbody>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.n}</td><td class="${r.mean>=.8?'good':''}">${pct(r.mean)}</td><td>${pct(r.med)}</td><td>${r.sd==null?'—':pct(r.sd)}</td><td>${pct(r.min)}</td><td>${pct(r.max)}</td></tr>`).join('')}</tbody></table></div>
       <div class="hint">Écart type calculé sur l'échantillon (n − 1) ; il faut au moins deux internes. En vert : moyenne ≥ 80 %.</div>`:'<div class="hint">Aucun interne n\'a encore validé ce dossier.</div>'}
     </section></div>`;
+  const bp=page.querySelector('#st-pdf');
+  if(bp) bp.onclick=async()=>{ bp.disabled=true; const t=bp.textContent; bp.textContent='Préparation…';
+    try{ await DiceHistory.exportStatsPdf(d||{title:'Dossier supprimé',category:''},rows,
+      `${rs.length} interne${rs.length>1?'s':''} ${rs.length>1?'ont':'a'} validé ce dossier (${all.length} validation${all.length>1?'s':''} au total). Pour chaque interne, seule sa dernière validation est comptée.`); }
+    catch(e){ if(e&&e.code!=='declined') await message('Export PDF impossible',e.message||String(e)); }
+    finally{ bp.disabled=false; bp.textContent=t; } };
 }
 
 // ---- suivi des internes (administrateur) ----

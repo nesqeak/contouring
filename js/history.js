@@ -136,5 +136,38 @@ async function exportPdf(d,results,names,who){
   const dl=window.claude&&typeof claude.use==='function'?await claude.use('downloads'):null;
   if(dl) await dl.save({filename,data:doc.output('blob')}); else doc.save(filename);
 }
-window.DiceHistory={render};
+// Export PDF des statistiques d'un dossier (page administrateur) : rows = [{name,n,mean,med,sd,min,max}]
+async function exportStatsPdf(d,rows,info){
+  const {jsPDF}=await loadJsPDF();
+  const doc=new jsPDF({unit:'mm',format:'a4'}), PW=210, M=15, CW=PW-2*M; let y=M;
+  const txt=(s,x,yy,o)=>doc.text(String(s),x,yy,o), dash=v=>v==null||isNaN(v)?'-':pct(v);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
+  txt('Service de Radiothérapie · Plateforme d\'entraînement au contourage',M,y); txt('Exporté le '+new Date().toLocaleDateString('fr-FR'),PW-M,y,{align:'right'});
+  y+=10; doc.setTextColor(20); doc.setFont('helvetica','bold'); doc.setFontSize(18); txt(d.category||'-',M,y);
+  y+=8; doc.setFont('helvetica','normal'); doc.setFontSize(13); doc.splitTextToSize(d.title,CW).forEach(l=>{txt(l,M,y); y+=6;});
+  y+=2; doc.setDrawColor(200); doc.line(M,y,PW-M,y); y+=8;
+  doc.setFont('helvetica','bold'); doc.setFontSize(11); txt('Statistiques du Dice par structure',M,y); y+=6;
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(70);
+  doc.splitTextToSize(info,CW).forEach(l=>{txt(l,M,y); y+=4.5;}); y+=3;
+  const cols=['Structure','Internes','Moyenne','Médiane','Écart type','Minimum','Maximum'], first=58, cw=(CW-first)/6, xOf=i=>i?M+first+(i-1)*cw:M;
+  const header=()=>{ doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(80);
+    cols.forEach((c,i)=>txt(c,i?xOf(i)+cw-1:xOf(i),y,{align:i?'right':'left'})); y+=2; doc.setDrawColor(180); doc.line(M,y,PW-M,y); y+=5; doc.setFont('helvetica','normal'); };
+  header();
+  for(const r of rows){
+    if(y>280){ doc.addPage(); y=M; header(); }
+    const name=doc.splitTextToSize(r.name,first-3);
+    const cells=[r.n,dash(r.mean),dash(r.med),r.sd==null?'-':dash(r.sd),dash(r.min),dash(r.max)];
+    doc.setFontSize(9); doc.setTextColor(40); name.forEach((l,k)=>txt(l,M,y+k*4));
+    cells.forEach((c,i)=>{ if(i===1&&r.mean>=.8) doc.setTextColor(0,125,60); else doc.setTextColor(40); txt(c,xOf(i+1)+cw-1,y,{align:'right'}); });
+    y+=Math.max(1,name.length)*4; doc.setDrawColor(225); doc.line(M,y-2,PW-M,y-2); y+=4;
+  }
+  doc.setFontSize(7.5); doc.setTextColor(110); y+=2;
+  txt('Écart type calculé sur l\'échantillon (n - 1), à partir de deux internes. En vert : moyenne >= 80 %.',M,y);
+  doc.setTextColor(130); txt('Plateforme à but de formation : ne doit pas être utilisée pour la planification clinique.',PW/2,290,{align:'center'});
+  const safe=s=>s.replace(/Œ/g,'OE').replace(/œ/g,'oe').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
+  const filename=`Statistiques_Dice_${safe(d.category||'dossier')}_${safe(d.title)}.pdf`;
+  const dl=window.claude&&typeof claude.use==='function'?await claude.use('downloads'):null;
+  if(dl) await dl.save({filename,data:doc.output('blob')}); else doc.save(filename);
+}
+window.DiceHistory={render,exportStatsPdf};
 })();
